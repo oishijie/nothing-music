@@ -1,15 +1,19 @@
 package com.nothingmusic.data.repository
 
-import android.app.Application
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
-import android.provider.MediaStore
+import androidx.documentfile.provider.DocumentFile
 import com.nothingmusic.data.local.dao.FavoriteDao
 import com.nothingmusic.data.local.dao.PlaylistDao
 import com.nothingmusic.data.local.dao.ScannedFolderDao
-import com.nothingmusic.data.local.dao.SearchHistoryDao
+import com.nothingmusic.data.local.dao.TrackDao
+import com.nothingmusic.data.local.entity.FavoriteEntity
 import com.nothingmusic.data.local.entity.PlaylistEntity
 import com.nothingmusic.data.local.entity.PlaylistTrackEntity
 import com.nothingmusic.data.local.entity.ScannedFolderEntity
+import com.nothingmusic.data.local.entity.TrackEntity
+import com.nothingmusic.data.lyrics.LrcLyricsResolver
 import com.nothingmusic.data.scanner.AudioScanner
 import com.nothingmusic.domain.model.Album
 import com.nothingmusic.domain.model.Artist
@@ -18,38 +22,41 @@ import com.nothingmusic.domain.model.Lyrics
 import com.nothingmusic.domain.model.Playlist
 import com.nothingmusic.domain.model.Track
 import com.nothingmusic.domain.repository.MusicRepository
-import com.nothingmusic.data.lyrics.LrcLyricsResolver
-import com.nothingmusic.data.lyrics.LyricsParser
+import com.nothingmusic.util.SafUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
 @Singleton
 class MusicRepositoryImpl @Inject constructor(
-    @ApplicationContext private val context: ContextLike,
+    @ApplicationContext private val context: Context,
     private val scanner: AudioScanner,
     private val playlistDao: PlaylistDao,
     private val scannedFolderDao: ScannedFolderDao,
     private val favoriteDao: FavoriteDao,
+    private val trackDao: TrackDao,
 ) : MusicRepository {
 
-    private val _tracks = MutableStateFlow<List<Track>>(emptyList())
-    override val tracks: StateFlow<List<Track>> = _tracks
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override val tracks: StateFlow<List<Track>> =
+        trackDao.observeAll()
+            .map { rows -> rows.map(TrackEntity::toDomain) }
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override val favoriteIds: StateFlow<List<Long>> =
         favoriteDao.observeFavoriteIds()
-            .stateIn(scannerScope(), SharingStarted.WhileSubscribed(5_000), emptyList())
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override val albums: StateFlow<List<Album>> =
         tracks.map { list ->
@@ -65,7 +72,7 @@ class MusicRepositoryImpl @Inject constructor(
                     )
                 }
                 .sortedBy { it.name.lowercase() }
-        }.stateIn(scannerScope(), SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override val artists: StateFlow<List<Artist>> =
         tracks.map { list ->
@@ -79,20 +86,19 @@ class MusicRepositoryImpl @Inject constructor(
                     )
                 }
                 .sortedBy { it.name.lowercase() }
-        }.stateIn(scannerScope(), SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override val folders: StateFlow<List<Folder>> =
-        combine(tracks, scannedFolderDao.observeFolders()) { allTracks, scanned ->
-            scanned.map { entity ->
-                val folderTracks = allTracks.filter { it.folderPath.startsWith(entity.path) }
+        combine(tracks, scannedFolderDao.observeFolders()) { allTracks, roots ->
+            roots.map { entity ->
                 Folder(
                     path = entity.path,
-                    name = entity.path.substringAfterLast('/'),
-                    trackCount = folderTracks.size,
+                    name = entity.displayName.ifBlank { SafUtils.treeDisplayName(entity.path) },
+                    trackCount = allTracks.count { it.folderPath == entity.path },
                     isSelected = true,
                 )
             }.sortedBy { it.name.lowercase() }
-        }.stateIn(scannerScope(), SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override val playlists: StateFlow<List<Playlist>> =
         combine(
@@ -107,12 +113,31 @@ class MusicRepositoryImpl @Inject constructor(
                     createdAt = entity.createdAt,
                 )
             }
-        }.stateIn(scannerScope(), SharingStarted.WhileSubscribed(5_000), emptyList())
+        }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override suspend fun refreshLibrary(scannedFolders: List<String>) {
-        val scanned = scannedFolders.ifEmpty { getAllScannedFolderPaths() }
-        val result = scanner.scanAllMusic(scanned)
-        _tracks.value = result
+        val roots = (scannedFolders.ifEmpty { getAllScannedFolderPaths() })
+            .filter { it.startsWith("content://") }
+        if (roots.isEmpty()) {
+            trackDao.deleteAll()
+            return
+        }
+        val cachedRows = trackDao.getAll()
+        val known = cachedRows.associate { it.uri to it.toDomain() }
+        val scans = scanner.scanFolders(roots, known)
+
+        for (scan in scans) {
+            if (!scan.accessible) continue
+            if (scan.tracks.isNotEmpty()) {
+                trackDao.upsertAll(scan.tracks.map(Track::toEntity))
+            }
+            val scannedUris = scan.tracks.mapTo(HashSet()) { it.path }
+            val stale = cachedRows
+                .filter { it.folderUri == scan.folderUri && it.uri !in scannedUris }
+                .map { it.uri }
+            stale.chunked(SQLITE_BATCH).forEach { trackDao.deleteByUris(it) }
+        }
+        trackDao.deleteOutsideFolders(roots)
     }
 
     override suspend fun getAllScannedFolderPaths(): List<String> = scannedFolderDao.getAllPaths()
@@ -120,22 +145,41 @@ class MusicRepositoryImpl @Inject constructor(
     override suspend fun getScannedFolders(): List<String> = scannedFolderDao.getAllPaths()
 
     override suspend fun addScannedFolder(path: String) {
-        scannedFolderDao.insert(ScannedFolderEntity(path = path))
+        val existing = scannedFolderDao.getAllPaths()
+        // 父目录已在扫描范围内时，子目录无需重复授权与扫描。
+        if (existing.any { it != path && SafUtils.isNestedTree(path, it) }) return
+
+        takePersistablePermission(path)
+        val displayName = withContext(Dispatchers.IO) {
+            runCatching { DocumentFile.fromTreeUri(context, Uri.parse(path))?.name }.getOrNull()
+        } ?: SafUtils.treeDisplayName(path)
+        scannedFolderDao.insert(ScannedFolderEntity(path = path, displayName = displayName))
+
+        // 新加的父目录覆盖已选中的子目录，移除子目录避免重复计数。
+        existing.filter { it != path && SafUtils.isNestedTree(it, path) }.forEach { child ->
+            scannedFolderDao.delete(child)
+            trackDao.deleteByFolder(child)
+            releasePersistablePermission(child)
+        }
         refreshLibrary(getAllScannedFolderPaths())
     }
 
     override suspend fun removeScannedFolder(path: String) {
         scannedFolderDao.delete(path)
-        refreshLibrary(getAllScannedFolderPaths())
+        trackDao.deleteByFolder(path)
+        releasePersistablePermission(path)
     }
 
-    override suspend fun getAllTracks(): List<Track> = _tracks.value
+    override suspend fun getAllTracks(): List<Track> = trackDao.getAll().map(TrackEntity::toDomain)
 
-    override suspend fun trackById(id: Long): Track? = _tracks.value.firstOrNull { it.id == id }
+    override suspend fun trackById(id: Long): Track? = trackDao.getById(id)?.toDomain()
 
     override suspend fun tracksByIds(ids: List<Long>): List<Track> {
-        val byId = _tracks.value.associateBy { it.id }
-        return ids.mapNotNull { byId[it] }
+        if (ids.isEmpty()) return emptyList()
+        val byId = ids.chunked(SQLITE_BATCH)
+            .flatMap { trackDao.getByIds(it) }
+            .associateBy { it.id }
+        return ids.mapNotNull { byId[it]?.toDomain() }
     }
 
     override fun observePlaylistTrackIds(playlistId: Long): Flow<List<Long>> =
@@ -144,7 +188,7 @@ class MusicRepositoryImpl @Inject constructor(
     override suspend fun toggleFavorite(trackId: Long) {
         val favorites = favoriteDao.getFavoriteIds()
         if (trackId in favorites) favoriteDao.delete(trackId)
-        else favoriteDao.insert(com.nothingmusic.data.local.entity.FavoriteEntity(trackId = trackId))
+        else favoriteDao.insert(FavoriteEntity(trackId = trackId))
     }
 
     override suspend fun isFavorite(trackId: Long): Boolean = trackId in favoriteDao.getFavoriteIds()
@@ -158,7 +202,7 @@ class MusicRepositoryImpl @Inject constructor(
                     it.title.lowercase().contains(q) ||
                         it.artist.lowercase().contains(q) ||
                         it.album.lowercase().contains(q) ||
-                        it.path.lowercase().contains(q)
+                        it.documentName.lowercase().contains(q)
                 }
             }
         }
@@ -191,7 +235,65 @@ class MusicRepositoryImpl @Inject constructor(
     override suspend fun getLyrics(track: Track): Lyrics =
         LrcLyricsResolver.resolve(context, track)
 
-    private fun scannerScope() = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private fun takePersistablePermission(path: String) {
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                Uri.parse(path),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+    }
+
+    private fun releasePersistablePermission(path: String) {
+        runCatching {
+            context.contentResolver.releasePersistableUriPermission(
+                Uri.parse(path),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        }
+    }
+
+    private companion object {
+        const val SQLITE_BATCH = 500
+    }
 }
 
-private typealias ContextLike = android.content.Context
+private fun TrackEntity.toDomain(): Track = Track(
+    id = id,
+    title = title,
+    artist = artist,
+    album = album,
+    durationMs = durationMs,
+    path = uri,
+    albumArtUri = artworkUri?.let(Uri::parse),
+    folderPath = folderUri,
+    dateAdded = dateAdded,
+    trackNumber = trackNumber,
+    year = year,
+    mimeType = mimeType,
+    sizeBytes = sizeBytes,
+    sampleRate = sampleRate,
+    bitrate = bitrate,
+    lastModified = lastModified,
+    documentName = documentName,
+)
+
+private fun Track.toEntity(): TrackEntity = TrackEntity(
+    id = id,
+    uri = path,
+    documentName = documentName,
+    title = title,
+    artist = artist,
+    album = album,
+    durationMs = durationMs,
+    folderUri = folderPath,
+    dateAdded = dateAdded,
+    trackNumber = trackNumber,
+    year = year,
+    mimeType = mimeType,
+    sizeBytes = sizeBytes,
+    lastModified = lastModified,
+    sampleRate = sampleRate,
+    bitrate = bitrate,
+    artworkUri = albumArtUri?.toString(),
+)

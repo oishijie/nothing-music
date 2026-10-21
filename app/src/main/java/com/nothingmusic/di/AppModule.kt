@@ -6,6 +6,7 @@ import com.nothingmusic.data.local.dao.FavoriteDao
 import com.nothingmusic.data.local.dao.PlaylistDao
 import com.nothingmusic.data.local.dao.ScannedFolderDao
 import com.nothingmusic.data.local.dao.SearchHistoryDao
+import com.nothingmusic.data.local.dao.TrackDao
 import com.nothingmusic.data.repository.MusicRepositoryImpl
 import com.nothingmusic.data.scanner.AudioScanner
 import com.nothingmusic.domain.repository.MusicRepository
@@ -39,6 +40,9 @@ object AppModule {
     fun provideSearchHistoryDao(db: AppDatabase): SearchHistoryDao = db.searchHistoryDao()
 
     @Provides
+    fun provideTrackDao(db: AppDatabase): TrackDao = db.trackDao()
+
+    @Provides
     @Singleton
     fun provideSettingsManager(@ApplicationContext context: Context): SettingsManager =
         SettingsManager(context)
@@ -56,5 +60,13 @@ object AppModule {
         playlistDao: PlaylistDao,
         scannedFolderDao: ScannedFolderDao,
         favoriteDao: FavoriteDao,
-    ): MusicRepository = MusicRepositoryImpl(context, scanner, playlistDao, scannedFolderDao, favoriteDao)
+        trackDao: TrackDao,
+    ): MusicRepository = MusicRepositoryImpl(
+        context,
+        scanner,
+        playlistDao,
+        scannedFolderDao,
+        favoriteDao,
+        trackDao,
+    )
 }

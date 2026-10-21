@@ -32,8 +32,39 @@ data class PlaylistTrackEntity(
 
 @Entity(tableName = "scanned_folders")
 data class ScannedFolderEntity(
+    /** SAF 树 URI；旧版裸路径在 v2 迁移中清理。 */
     @PrimaryKey val path: String,
+    @androidx.room.ColumnInfo(defaultValue = "") val displayName: String = "",
     val addedAt: Long = System.currentTimeMillis(),
+)
+
+@Entity(
+    tableName = "tracks",
+    indices = [
+        androidx.room.Index(value = ["uri"], unique = true),
+        androidx.room.Index(value = ["folderUri"]),
+    ],
+)
+data class TrackEntity(
+    @PrimaryKey val id: Long,
+    /** SAF 文档 URI，同时作为播放 URI。 */
+    val uri: String,
+    val documentName: String,
+    val title: String,
+    val artist: String,
+    val album: String,
+    val durationMs: Long,
+    /** 所属树 URI，用于按文件夹筛选与增量清理。 */
+    val folderUri: String,
+    val dateAdded: Long,
+    val trackNumber: Int,
+    val year: Int,
+    val mimeType: String?,
+    val sizeBytes: Long,
+    val lastModified: Long,
+    val sampleRate: Int,
+    val bitrate: Int,
+    val artworkUri: String?,
 )
 
 @Entity(tableName = "favorites")

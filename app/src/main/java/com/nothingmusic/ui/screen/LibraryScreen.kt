@@ -227,7 +227,7 @@ fun LibraryScreen(
                         folders = folders,
                         tracks = tracks,
                         onPlayFolder = { folder ->
-                            val folderTracks = tracks.filter { it.folderPath.startsWith(folder.path) }
+                            val folderTracks = tracks.filter { it.folderPath == folder.path }
                             if (folderTracks.isNotEmpty()) {
                                 playerViewModel.playAll(folderTracks)
                                 onNavigateToNowPlaying()
@@ -629,7 +629,7 @@ private fun FoldersTab(
         modifier = Modifier.fillMaxSize(),
     ) {
         items(folders, key = { it.path }) { folder ->
-            val folderTracks = tracks.filter { it.folderPath.startsWith(folder.path) }
+            val folderTracks = tracks.filter { it.folderPath == folder.path }
             val totalDuration = folderTracks.sumOf { it.durationMs }
             Row(
                 modifier = Modifier
@@ -670,13 +670,6 @@ private fun FoldersTab(
                         text = "${folder.trackCount} tracks · ${FileUtils.readableDuration(totalDuration)}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = folder.path,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Box(

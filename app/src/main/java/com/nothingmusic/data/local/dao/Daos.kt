@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import com.nothingmusic.data.local.entity.PlaylistEntity
 import com.nothingmusic.data.local.entity.PlaylistTrackEntity
 import kotlinx.coroutines.flow.Flow
@@ -71,6 +72,39 @@ interface ScannedFolderDao {
 
     @Query("SELECT COUNT(*) FROM scanned_folders")
     suspend fun count(): Int
+}
+
+@Dao
+interface TrackDao {
+    @Query(
+        "SELECT * FROM tracks ORDER BY artist COLLATE NOCASE, " +
+            "album COLLATE NOCASE, trackNumber, title COLLATE NOCASE"
+    )
+    fun observeAll(): Flow<List<com.nothingmusic.data.local.entity.TrackEntity>>
+
+    @Query("SELECT * FROM tracks")
+    suspend fun getAll(): List<com.nothingmusic.data.local.entity.TrackEntity>
+
+    @Query("SELECT * FROM tracks WHERE id = :id")
+    suspend fun getById(id: Long): com.nothingmusic.data.local.entity.TrackEntity?
+
+    @Query("SELECT * FROM tracks WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<Long>): List<com.nothingmusic.data.local.entity.TrackEntity>
+
+    @Upsert
+    suspend fun upsertAll(tracks: List<com.nothingmusic.data.local.entity.TrackEntity>)
+
+    @Query("DELETE FROM tracks WHERE uri IN (:uris)")
+    suspend fun deleteByUris(uris: List<String>)
+
+    @Query("DELETE FROM tracks WHERE folderUri = :folderUri")
+    suspend fun deleteByFolder(folderUri: String)
+
+    @Query("DELETE FROM tracks WHERE folderUri NOT IN (:folders)")
+    suspend fun deleteOutsideFolders(folders: List<String>)
+
+    @Query("DELETE FROM tracks")
+    suspend fun deleteAll()
 }
 
 @Dao
