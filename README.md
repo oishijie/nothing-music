@@ -8,6 +8,10 @@
 </p>
 
 <p align="center">
+  <a href="README.zh-CN.md">简体中文</a> | English
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/Kotlin-2.2-purple" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Android-26%2B-blue" alt="Android" />
   <img src="https://img.shields.io/badge/Media3%2FExoPlayer-1.3.1-9cf" alt="ExoPlayer" />
