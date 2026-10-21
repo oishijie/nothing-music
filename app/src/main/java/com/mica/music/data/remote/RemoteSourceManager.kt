@@ -1,0 +1,610 @@
+package com.mica.music.data.remote
+
+import com.mica.music.data.SharedLyricsMemoryCache
+import com.mica.music.data.remote.navidrome.NavidromeException
+import com.mica.music.data.remote.navidrome.NavidromeHttpExecutor
+import com.mica.music.data.remote.navidrome.NavidromeProtocolCatalogApi
+import com.mica.music.data.remote.navidrome.NavidromeRequestFactory
+import com.mica.music.data.remote.navidrome.NavidromeSourceSync
+import com.mica.music.data.remote.navidrome.NavidromeSyncResult
+import com.mica.music.data.remote.webdav.WebDavSourceSync
+import com.mica.music.data.remote.webdav.WebDavSyncResult
+import com.mica.music.data.remote.smb.SmbPathCodec
+import com.mica.music.data.remote.smb.SmbSourceSync
+import com.mica.music.data.remote.aliyundrive.AliyunDriveSourceSync
+import com.mica.music.data.remote.aliyundrive.AliyunDriveSyncResult
+import com.mica.music.data.remote.alist.AListSourceSync
+import com.mica.music.data.remote.alist.AListSyncResult
+import com.mica.music.data.remote.smb.SmbSyncResult
+import java.net.URI
+import java.util.UUID
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+/**
+ * Application-facing owner for remote source configuration and explicit synchronization.
+ *
+ * Credential rotation always writes a brand-new credentialRef before atomically switching the
+ * source row to that ref. The currently published source therefore never observes new credential
+ * material paired with its old endpoint/config revision.
+ *
+ * Catalog sync for a given source is single-flight: overlapping manual and automatic refreshes
+ * serialize on one per-source mutex so they cannot publish concurrently under a shared operation
+ * token. Operation generation is still advanced only by source edit / explicit invalidation.
+ */
+internal class RemoteSourceManager internal constructor(
+    private val catalogRepository: RemoteCatalogRepository,
+    private val credentialStore: MutableSecureRemoteCredentialStore,
+    private val navidromeExecutor: NavidromeHttpExecutor,
+    private val navidromeRequestFactory: NavidromeRequestFactory = NavidromeRequestFactory(),
+    private val sourceIdProvider: (RemoteSourceType) -> String = { type -> "${type.name.lowercase()}-${UUID.randomUUID()}" },
+    private val credentialRefProvider: (String) -> String = { sourceId ->
+        "remote-credential/$sourceId/${UUID.randomUUID()}"
+    },
+    private val automaticSyncRequest: () -> Unit = {},
+) {
+    private val sourceSyncLockGuard = Mutex()
+    private val sourceSyncLocks = mutableMapOf<String, Mutex>()
+
+    constructor(
+        catalogRepository: RemoteCatalogRepository,
+        credentialStore: MutableSecureRemoteCredentialStore,
+        automaticSyncRequest: () -> Unit = {},
+    ) : this(
+        catalogRepository = catalogRepository,
+        credentialStore = credentialStore,
+        navidromeExecutor = com.mica.music.data.remote.navidrome.UrlConnectionNavidromeHttpExecutor(),
+        automaticSyncRequest = automaticSyncRequest,
+    )
+
+    suspend fun statuses(): List<RemoteSourceStatus> = catalogRepository.sourceStatuses()
+
+    suspend fun createNavidrome(
+        displayName: String,
+        endpoint: String,
+        username: String,
+        password: String,
+        enabled: Boolean = true,
+    ): RemoteSourceInstance {
+        val sourceId = sourceIdProvider(RemoteSourceType.NAVIDROME).trim()
+        require(sourceId.isNotBlank()) { "Generated remote source id must not be blank" }
+        val credentialRef = credentialRefProvider(sourceId).trim()
+        require(credentialRef.isNotBlank()) { "Generated credentialRef must not be blank" }
+        val instance = RemoteSourceInstance(
+            id = sourceId,
+            type = RemoteSourceType.NAVIDROME,
+            displayName = normalizeDisplayName(displayName),
+            endpoint = normalizeHttpEndpoint(endpoint),
+            credentialRef = credentialRef,
+            enabled = enabled,
+        )
+        credentialStore.put(
+            credentialRef,
+            RemoteCredentialMaterial.UsernamePassword(
+                username = normalizeUsername(username),
+                password = normalizePassword(password),
+            ),
+        )
+        catalogRepository.upsertSource(instance)
+        if (instance.enabled) automaticSyncRequest()
+        return instance
+    }
+
+    suspend fun createWebDav(
+        displayName: String,
+        endpoint: String,
+        username: String,
+        password: String,
+        enabled: Boolean = true,
+    ): RemoteSourceInstance {
+        val sourceId = sourceIdProvider(RemoteSourceType.WEBDAV).trim()
+        require(sourceId.isNotBlank()) { "Generated remote source id must not be blank" }
+        val credentialRef = credentialRefProvider(sourceId).trim()
+        require(credentialRef.isNotBlank()) { "Generated credentialRef must not be blank" }
+        val instance = RemoteSourceInstance(
+            id = sourceId,
+            type = RemoteSourceType.WEBDAV,
+            displayName = normalizeDisplayName(displayName),
+            endpoint = normalizeHttpEndpoint(endpoint),
+            credentialRef = credentialRef,
+            enabled = enabled,
+        )
+        credentialStore.put(
+            credentialRef,
+            RemoteCredentialMaterial.UsernamePassword(
+                username = normalizeUsername(username),
+                password = normalizePassword(password),
+            ),
+        )
+        catalogRepository.upsertSource(instance)
+        if (instance.enabled) automaticSyncRequest()
+        return instance
+    }
+    suspend fun createSmb(
+        displayName: String,
+        endpoint: String,
+        username: String,
+        password: String,
+        enabled: Boolean = true,
+    ): RemoteSourceInstance {
+        val sourceId = sourceIdProvider(RemoteSourceType.SMB).trim()
+        require(sourceId.isNotBlank()) { "Generated remote source id must not be blank" }
+        val credentialRef = credentialRefProvider(sourceId).trim()
+        require(credentialRef.isNotBlank()) { "Generated credentialRef must not be blank" }
+        val instance = RemoteSourceInstance(
+            id = sourceId,
+            type = RemoteSourceType.SMB,
+            displayName = normalizeDisplayName(displayName),
+            endpoint = SmbPathCodec.normalizeSourceEndpoint(endpoint),
+            credentialRef = credentialRef,
+            enabled = enabled,
+        )
+        credentialStore.put(
+            credentialRef,
+            if (username.isBlank()) RemoteCredentialMaterial.Anonymous else RemoteCredentialMaterial.UsernamePassword(
+                username = normalizeUsername(username),
+                password = password,
+            ),
+        )
+        catalogRepository.upsertSource(instance)
+
+        return instance
+    }
+    suspend fun updateSourceConfig(
+        sourceInstanceId: String,
+        displayName: String,
+        endpoint: String,
+        enabled: Boolean,
+    ): RemoteSourceInstance {
+        val current = requireSource(sourceInstanceId)
+        require(current.type != RemoteSourceType.SMB || normalizeEndpoint(current.type, endpoint) == current.endpoint) { "更换 SMB 地址请添加新连接，以保留旧歌单的来源身份" }
+        val updated = current.copy(
+            displayName = normalizeDisplayName(displayName),
+            endpoint = normalizeEndpoint(current.type, endpoint),
+            enabled = enabled,
+        )
+        catalogRepository.upsertSource(updated)
+        invalidateSourceLyrics(sourceInstanceId)
+        if (updated.enabled && updated.type != RemoteSourceType.SMB) automaticSyncRequest()
+        return updated
+    }
+
+    suspend fun setEnabled(sourceInstanceId: String, enabled: Boolean): RemoteSourceInstance {
+        val current = requireSource(sourceInstanceId)
+        if (current.enabled == enabled) return current
+        val updated = current.copy(enabled = enabled)
+        catalogRepository.upsertSource(updated)
+        invalidateSourceLyrics(sourceInstanceId)
+        if (updated.enabled && updated.type != RemoteSourceType.SMB) automaticSyncRequest()
+        return updated
+    }
+
+    suspend fun deleteSource(sourceInstanceId: String) {
+        val current = requireSource(sourceInstanceId)
+        val mediaIds = catalogRepository.tracksForSource(sourceInstanceId)
+            .map(RemoteTrackSummary::mediaId)
+        check(catalogRepository.deleteSource(sourceInstanceId)) {
+            "Remote source disappeared during deletion"
+        }
+        SharedLyricsMemoryCache.invalidateSongs(mediaIds)
+        credentialStore.delete(current.credentialRef)
+        forgetSourceCatalogSyncLock(sourceInstanceId)
+    }
+    suspend fun rotateNavidromeCredentials(
+        sourceInstanceId: String,
+        username: String,
+        password: String,
+    ): RemoteSourceInstance {
+        val current = requireNavidromeSource(sourceInstanceId)
+        return rotateUsernamePasswordCredentials(current, username, password)
+    }
+
+    suspend fun rotateWebDavCredentials(
+        sourceInstanceId: String,
+        username: String,
+        password: String,
+    ): RemoteSourceInstance {
+        val current = requireWebDavSource(sourceInstanceId)
+        return rotateUsernamePasswordCredentials(current, username, password)
+    }
+    suspend fun rotateSmbCredentials(
+        sourceInstanceId: String,
+        username: String,
+        password: String,
+    ): RemoteSourceInstance {
+        val current = requireSmbSource(sourceInstanceId)
+        return rotateUsernamePasswordCredentials(current, username, password)
+    }
+
+    suspend fun createAliyunDrive(
+        displayName: String,
+        endpoint: String,
+        refreshToken: String,
+        enabled: Boolean = true,
+    ): RemoteSourceInstance {
+        val sourceId = sourceIdProvider(RemoteSourceType.ALIYUNDRIVE).trim()
+        require(sourceId.isNotBlank()) { "Generated remote source id must not be blank" }
+        val credentialRef = credentialRefProvider(sourceId).trim()
+        require(credentialRef.isNotBlank()) { "Generated credentialRef must not be blank" }
+        val instance = RemoteSourceInstance(
+            id = sourceId,
+            type = RemoteSourceType.ALIYUNDRIVE,
+            displayName = normalizeDisplayName(displayName),
+            endpoint = normalizeEndpoint(RemoteSourceType.ALIYUNDRIVE, endpoint),
+            credentialRef = credentialRef,
+            enabled = enabled,
+        )
+        credentialStore.put(
+            credentialRef,
+            RemoteCredentialMaterial.BearerToken(
+                username = "aliyundrive",
+                token = normalizeAliyunRefreshToken(refreshToken),
+            ),
+        )
+        catalogRepository.upsertSource(instance)
+
+        return instance
+    }
+
+    suspend fun rotateAliyunDriveCredentials(
+        sourceInstanceId: String,
+        refreshToken: String,
+    ): RemoteSourceInstance {
+        val current = requireAliyunDriveSource(sourceInstanceId)
+        val nextCredentialRef = credentialRefProvider(current.id).trim()
+        require(nextCredentialRef.isNotBlank() && nextCredentialRef != current.credentialRef) {
+            "Credential rotation must allocate a new credentialRef"
+        }
+        credentialStore.put(
+            nextCredentialRef,
+            RemoteCredentialMaterial.BearerToken(
+                username = "aliyundrive",
+                token = normalizeAliyunRefreshToken(refreshToken),
+            ),
+        )
+        val updated = current.copy(credentialRef = nextCredentialRef)
+        catalogRepository.upsertSource(updated)
+        credentialStore.delete(current.credentialRef)
+        invalidateSourceLyrics(current.id)
+        if (updated.enabled) automaticSyncRequest()
+        return updated
+    }
+
+    suspend fun createAList(
+        displayName: String,
+        endpoint: String,
+        username: String,
+        password: String,
+        enabled: Boolean = true,
+    ): RemoteSourceInstance {
+        val sourceId = sourceIdProvider(RemoteSourceType.ALIST).trim()
+        require(sourceId.isNotBlank()) { "Generated remote source id must not be blank" }
+        val credentialRef = credentialRefProvider(sourceId).trim()
+        require(credentialRef.isNotBlank()) { "Generated credentialRef must not be blank" }
+        val instance = RemoteSourceInstance(
+            id = sourceId,
+            type = RemoteSourceType.ALIST,
+            displayName = normalizeDisplayName(displayName),
+            endpoint = normalizeHttpEndpoint(endpoint),
+            credentialRef = credentialRef,
+            enabled = enabled,
+        )
+        // 游客模式：用户名密码都留空即匿名访问；只填密码不填用户名没有意义，拒绝。
+        val trimmedUsername = username.trim()
+        val trimmedPassword = password.trim()
+        credentialStore.put(
+            credentialRef,
+            if (trimmedUsername.isEmpty() && trimmedPassword.isEmpty()) {
+                RemoteCredentialMaterial.Anonymous
+            } else {
+                RemoteCredentialMaterial.UsernamePassword(
+                    username = normalizeUsername(trimmedUsername),
+                    password = trimmedPassword,
+                )
+            },
+        )
+        catalogRepository.upsertSource(instance)
+        if (instance.enabled) automaticSyncRequest()
+        return instance
+    }
+
+    suspend fun rotateAListCredentials(
+        sourceInstanceId: String,
+        username: String,
+        password: String,
+    ): RemoteSourceInstance {
+        val current = requireAListSource(sourceInstanceId)
+        val nextCredentialRef = credentialRefProvider(current.id).trim()
+        require(nextCredentialRef.isNotBlank() && nextCredentialRef != current.credentialRef) {
+            "Credential rotation must allocate a new credentialRef"
+        }
+        val trimmedUsername = username.trim()
+        val trimmedPassword = password.trim()
+        credentialStore.put(
+            nextCredentialRef,
+            if (trimmedUsername.isEmpty() && trimmedPassword.isEmpty()) {
+                RemoteCredentialMaterial.Anonymous
+            } else {
+                RemoteCredentialMaterial.UsernamePassword(
+                    username = normalizeUsername(trimmedUsername),
+                    password = trimmedPassword,
+                )
+            },
+        )
+        val updated = current.copy(credentialRef = nextCredentialRef)
+        catalogRepository.upsertSource(updated)
+        credentialStore.delete(current.credentialRef)
+        invalidateSourceLyrics(current.id)
+        if (updated.enabled) automaticSyncRequest()
+        return updated
+    }
+
+    suspend fun syncSource(sourceInstanceId: String) {
+        try {
+            when (requireSource(sourceInstanceId).type) {
+                RemoteSourceType.NAVIDROME -> syncNavidrome(sourceInstanceId)
+                RemoteSourceType.WEBDAV -> syncWebDav(sourceInstanceId)
+                RemoteSourceType.SMB -> error("SMB uses directory browsing; full-source sync is disabled")
+                RemoteSourceType.ALIYUNDRIVE -> syncAliyunDrive(sourceInstanceId)
+                RemoteSourceType.ALIST -> syncAList(sourceInstanceId)
+            }
+        } catch (failure: Throwable) {
+            // 失败也要收掉进度，否则界面会一直停在「同步中」。
+            RemoteSyncProgress.fail(sourceInstanceId)
+            throw failure
+        }
+    }
+
+    suspend fun syncEnabledSourcesIfStale(
+        nowMs: Long = System.currentTimeMillis(),
+        staleAfterMs: Long,
+    ): RemoteAutoSyncResult {
+        val candidates = statuses().filter { it.needsAutomaticSync(nowMs, staleAfterMs) }
+        val failed = ArrayList<String>()
+        var succeeded = 0
+        candidates.forEach { status ->
+            runCatching { syncSource(status.instance.id) }
+                .onSuccess { succeeded += 1 }
+                .onFailure { failed += status.instance.id }
+        }
+        return RemoteAutoSyncResult(
+            attempted = candidates.size,
+            succeeded = succeeded,
+            failedSourceIds = failed,
+        )
+    }
+    suspend fun testConnection(sourceInstanceId: String) {
+        val source = requireSource(sourceInstanceId)
+        require(source.enabled) { "Remote source is disabled" }
+        when (source.type) {
+            RemoteSourceType.NAVIDROME -> {
+                val owner = catalogRepository.sourceOwner(sourceInstanceId)
+                    ?: error("Remote source disappeared before connection test")
+                NavidromeProtocolCatalogApi(
+                    sourceOwner = owner,
+                    credentialStore = credentialStore,
+                    executor = navidromeExecutor,
+                    requestFactory = navidromeRequestFactory,
+                ).ping()
+            }
+            RemoteSourceType.WEBDAV -> WebDavSourceSync(catalogRepository, credentialStore)
+                .testConnection(sourceInstanceId)
+            RemoteSourceType.SMB -> SmbSourceSync(catalogRepository, credentialStore).testConnection(sourceInstanceId)
+            RemoteSourceType.ALIYUNDRIVE -> AliyunDriveSourceSync(catalogRepository, credentialStore)
+                .testConnection(sourceInstanceId)
+            RemoteSourceType.ALIST -> AListSourceSync(catalogRepository, credentialStore)
+                .testConnection(sourceInstanceId)
+        }
+    }
+
+    suspend fun syncNavidrome(
+        sourceInstanceId: String,
+        limit: Int = Int.MAX_VALUE,
+    ): NavidromeSyncResult = withSourceCatalogSyncLock(sourceInstanceId) {
+        val source = requireNavidromeSource(sourceInstanceId)
+        require(source.enabled) { "Remote source is disabled" }
+        val previousMediaIds = catalogRepository.tracksForSource(sourceInstanceId)
+            .mapTo(linkedSetOf(), RemoteTrackSummary::mediaId)
+        val result = NavidromeSourceSync(
+            catalogRepository = catalogRepository,
+            credentialStore = credentialStore,
+            executor = navidromeExecutor,
+            requestFactory = navidromeRequestFactory,
+        ).sync(sourceInstanceId, limit)
+        invalidateSourceLyrics(sourceInstanceId, previousMediaIds)
+        result
+    }
+
+    suspend fun syncWebDav(
+        sourceInstanceId: String,
+        limit: Int = Int.MAX_VALUE,
+    ): WebDavSyncResult = withSourceCatalogSyncLock(sourceInstanceId) {
+        val source = requireWebDavSource(sourceInstanceId)
+        require(source.enabled) { "Remote source is disabled" }
+        val previousMediaIds = catalogRepository.tracksForSource(sourceInstanceId)
+            .mapTo(linkedSetOf(), RemoteTrackSummary::mediaId)
+        val result = WebDavSourceSync(
+            catalogRepository = catalogRepository,
+            credentialStore = credentialStore,
+        ).sync(sourceInstanceId, limit)
+        invalidateSourceLyrics(sourceInstanceId, previousMediaIds)
+        result
+    }
+
+    suspend fun syncSmb(
+        sourceInstanceId: String,
+        limit: Int = Int.MAX_VALUE,
+    ): SmbSyncResult = withSourceCatalogSyncLock(sourceInstanceId) {
+        val source = requireSmbSource(sourceInstanceId)
+        require(source.enabled) { "Remote source is disabled" }
+        val previousMediaIds = catalogRepository.tracksForSource(sourceInstanceId)
+            .mapTo(linkedSetOf(), RemoteTrackSummary::mediaId)
+        val result = SmbSourceSync(
+            catalogRepository = catalogRepository,
+            credentialStore = credentialStore,
+        ).sync(sourceInstanceId, limit)
+        invalidateSourceLyrics(sourceInstanceId, previousMediaIds)
+        result
+    }
+
+    suspend fun syncAliyunDrive(
+        sourceInstanceId: String,
+        limit: Int = Int.MAX_VALUE,
+    ): AliyunDriveSyncResult = withSourceCatalogSyncLock(sourceInstanceId) {
+        val source = requireAliyunDriveSource(sourceInstanceId)
+        require(source.enabled) { "Remote source is disabled" }
+        val previousMediaIds = catalogRepository.tracksForSource(sourceInstanceId)
+            .mapTo(linkedSetOf(), RemoteTrackSummary::mediaId)
+        val result = AliyunDriveSourceSync(
+            catalogRepository = catalogRepository,
+            credentialStore = credentialStore,
+        ).sync(sourceInstanceId, limit)
+        invalidateSourceLyrics(sourceInstanceId, previousMediaIds)
+        result
+    }
+
+    suspend fun syncAList(
+        sourceInstanceId: String,
+        limit: Int = Int.MAX_VALUE,
+    ): AListSyncResult = withSourceCatalogSyncLock(sourceInstanceId) {
+        val source = requireAListSource(sourceInstanceId)
+        require(source.enabled) { "Remote source is disabled" }
+        val previousMediaIds = catalogRepository.tracksForSource(sourceInstanceId)
+            .mapTo(linkedSetOf(), RemoteTrackSummary::mediaId)
+        val result = AListSourceSync(
+            catalogRepository = catalogRepository,
+            credentialStore = credentialStore,
+        ).sync(sourceInstanceId, limit)
+        invalidateSourceLyrics(sourceInstanceId, previousMediaIds)
+        result
+    }
+
+    private suspend fun <T> withSourceCatalogSyncLock(
+        sourceInstanceId: String,
+        block: suspend () -> T,
+    ): T {
+        val lock = sourceSyncLockGuard.withLock {
+            sourceSyncLocks.getOrPut(sourceInstanceId) { Mutex() }
+        }
+        return lock.withLock { block() }
+    }
+
+    private suspend fun forgetSourceCatalogSyncLock(sourceInstanceId: String) {
+        sourceSyncLockGuard.withLock {
+            sourceSyncLocks.remove(sourceInstanceId)
+        }
+    }
+
+    private suspend fun rotateUsernamePasswordCredentials(
+        current: RemoteSourceInstance,
+        username: String,
+        password: String,
+    ): RemoteSourceInstance {
+        val nextCredentialRef = credentialRefProvider(current.id).trim()
+        require(nextCredentialRef.isNotBlank()) { "Generated credentialRef must not be blank" }
+        require(nextCredentialRef != current.credentialRef) {
+            "Credential rotation must allocate a new credentialRef"
+        }
+        credentialStore.put(
+            nextCredentialRef,
+            if (current.type == RemoteSourceType.SMB && username.isBlank()) RemoteCredentialMaterial.Anonymous else RemoteCredentialMaterial.UsernamePassword(
+                username = normalizeUsername(username),
+                password = if (current.type == RemoteSourceType.SMB) password else normalizePassword(password),
+            ),
+        )
+        val updated = current.copy(credentialRef = nextCredentialRef)
+        catalogRepository.upsertSource(updated)
+        credentialStore.delete(current.credentialRef)
+        invalidateSourceLyrics(current.id)
+        if (updated.enabled && updated.type != RemoteSourceType.SMB) automaticSyncRequest()
+        return updated
+    }
+    private suspend fun invalidateSourceLyrics(
+        sourceInstanceId: String,
+        additionalMediaIds: Collection<String> = emptyList(),
+    ) {
+        val mediaIds = additionalMediaIds.toMutableSet()
+        catalogRepository.tracksForSource(sourceInstanceId)
+            .mapTo(mediaIds, RemoteTrackSummary::mediaId)
+        SharedLyricsMemoryCache.invalidateSongs(mediaIds)
+    }
+
+    private suspend fun requireSource(sourceInstanceId: String): RemoteSourceInstance =
+        catalogRepository.source(sourceInstanceId)
+            ?: throw IllegalArgumentException("Unknown remote source id=$sourceInstanceId")
+
+    private suspend fun requireNavidromeSource(sourceInstanceId: String): RemoteSourceInstance =
+        requireSource(sourceInstanceId).also { source ->
+            require(source.type == RemoteSourceType.NAVIDROME) {
+                "Source $sourceInstanceId is not Navidrome"
+            }
+        }
+
+    private suspend fun requireWebDavSource(sourceInstanceId: String): RemoteSourceInstance =
+        requireSource(sourceInstanceId).also { source ->
+            require(source.type == RemoteSourceType.WEBDAV) {
+                "Source $sourceInstanceId is not WebDAV"
+            }
+        }
+    private suspend fun requireSmbSource(sourceInstanceId: String): RemoteSourceInstance =
+        requireSource(sourceInstanceId).also { source ->
+            require(source.type == RemoteSourceType.SMB) {
+                "Source $sourceInstanceId is not SMB"
+            }
+        }
+
+    private suspend fun requireAliyunDriveSource(sourceInstanceId: String): RemoteSourceInstance =
+        requireSource(sourceInstanceId).also { source ->
+            require(source.type == RemoteSourceType.ALIYUNDRIVE) {
+                "Source $sourceInstanceId is not AliyunDrive"
+            }
+        }
+
+    private suspend fun requireAListSource(sourceInstanceId: String): RemoteSourceInstance =
+        requireSource(sourceInstanceId).also { source ->
+            require(source.type == RemoteSourceType.ALIST) {
+                "Source $sourceInstanceId is not AList"
+            }
+        }
+    companion object {
+        internal fun normalizeEndpoint(type: RemoteSourceType, raw: String): String = when (type) {
+            RemoteSourceType.NAVIDROME,
+            RemoteSourceType.WEBDAV,
+            RemoteSourceType.ALIYUNDRIVE,
+            RemoteSourceType.ALIST,
+            -> normalizeHttpEndpoint(raw)
+            RemoteSourceType.SMB -> SmbPathCodec.normalizeSourceEndpoint(raw)
+        }
+
+        internal fun normalizeHttpEndpoint(raw: String): String {
+            val trimmed = raw.trim().trimEnd('/')
+            require(trimmed.isNotBlank()) { "Server address must not be blank" }
+            val uri = runCatching { URI(trimmed) }
+                .getOrElse { throw IllegalArgumentException("Invalid server address", it) }
+            require(uri.scheme.equals("http", ignoreCase = true) || uri.scheme.equals("https", ignoreCase = true)) {
+                "Server address must start with http:// or https://"
+            }
+            require(!uri.host.isNullOrBlank()) { "Server address must include a host" }
+            require(uri.userInfo == null) { "Server address must not contain username/password" }
+            require(uri.rawQuery == null && uri.rawFragment == null) {
+                "Server address must not contain query or fragment"
+            }
+            return trimmed
+        }
+
+        private fun normalizeDisplayName(value: String): String =
+            value.trim().also { require(it.isNotBlank()) { "Display name must not be blank" } }
+
+        private fun normalizeUsername(value: String): String =
+            value.trim().also { require(it.isNotBlank()) { "Username must not be blank" } }
+
+        private fun normalizePassword(value: String): String =
+            value.also { require(it.isNotBlank()) { "Password must not be blank" } }
+
+        private fun normalizeAliyunRefreshToken(value: String): String {
+            val trimmed = value.trim()
+            require(trimmed.isNotBlank()) { "refresh_token 不能为空" }
+            return trimmed
+        }
+    }
+}
