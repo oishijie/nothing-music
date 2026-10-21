@@ -4,14 +4,11 @@
 
 <p align="center">
   <b>A distraction-free Android music player.</b><br />
-  Fully offline, local library — with a 5-band equalizer, LRC lyrics, sleep timer, and a clean monochrome interface.
+  Local library and cloud drives in one place — 5-band equalizer, synced lyrics, sleep timer, and a clean monochrome interface.
 </p>
 
 <p align="center">
-  <a href="https://github.com/NavatejR/nothing-music/actions/workflows/ci.yml">
-    <img src="https://github.com/NavatejR/nothing-music/actions/workflows/ci.yml/badge.svg" alt="CI" />
-  </a>
-  <img src="https://img.shields.io/badge/Kotlin-2.0-purple" alt="Kotlin" />
+  <img src="https://img.shields.io/badge/Kotlin-2.2-purple" alt="Kotlin" />
   <img src="https://img.shields.io/badge/Android-26%2B-blue" alt="Android" />
   <img src="https://img.shields.io/badge/Media3%2FExoPlayer-1.3.1-9cf" alt="ExoPlayer" />
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License" />
@@ -21,24 +18,30 @@
 
 ## About
 
-Nothing Music is a native Android music player built with **Kotlin** and **Jetpack Compose** (Material 3). It plays your local audio library through **Media3/ExoPlayer** — no accounts, no cloud, no ads. The app indexes your files into a local **Room** database, serves playback through a foreground media service, and renders everything in a calm, high-contrast "dot-matrix" aesthetic.
+Nothing Music is a native Android music player built with **Kotlin** and **Jetpack Compose** (Material 3). It plays both your local audio library and music stored on remote sources through **Media3/ExoPlayer** — no accounts required for the app itself and no ads. Local files are indexed into a **Room** database; remote libraries are synced into a separate database and streamed on demand. Everything renders in a calm, high-contrast "dot-matrix" aesthetic.
 
 ## Features
 
-- **Local-first library** — scans folders via the storage-access framework and persists metadata to a local Room/SQLite database (`nothing_music.db`). Supports MP3, AAC, M4A, FLAC, OGG, Opus, WAV, ALAC, AIFF, WMA, DSF and DFF.
+- **Local library** — scans folders via the storage-access framework and persists metadata to a local Room/SQLite database. Supports MP3, AAC, M4A, FLAC, OGG, Opus, WAV, ALAC, AIFF, WMA, DSF and DFF.
+- **Remote sources** — connect cloud drives and self-hosted servers, sync their catalogs, and stream on demand:
+  - **Aliyun Drive** (阿里云盘) — OpenAPI client with signed URL resolution and embedded lyrics/artwork probing.
+  - **OpenList / AList** — AList v3 API (`/api/fs/list`, `/api/fs/get`), works with any storage driver OpenList mounts.
+  - **WebDAV** — HTTP Range streaming, sidecar lyrics and artwork.
+  - **SMB** — direct SMB session streaming for NAS shares.
+  - **Navidrome** — Subsonic-compatible music server.
+- **Synced lyrics** — embedded lyrics first, then sidecar files; when neither exists it falls back to online lookup on [LRCLIB](https://lrclib.net). Shown inline on the Now Playing screen.
 - **Foreground media playback** — a `mediaPlayback` foreground service (Media3 `MediaSessionService`) keeps audio playing with the screen off, with wake-lock support.
-- **5-band equalizer** — ±15 dB per band, tuned via the equalizer screen.
-- **LRC lyrics** — parses `.lrc` sidecar files and shows synced lyrics.
-- **Sleep timer** — fades playback out (default 30 s) and stops at the configured time.
-- **Playlists & favorites** — create playlists and favorite tracks, all stored locally.
-- **Album & artist browsing** — instant search across tracks; quick-stats on the search screen.
-- **Mini player** — a floating mini player keeps controls available on the library screen.
+- **5-band equalizer** — ±15 dB per band.
+- **Sleep timer** — fades playback out and stops at the configured time.
+- **Playlists & favorites** — create playlists and favorite tracks.
+- **Instant search** — searches tracks, artists and albums as you type.
+- **Chinese localization** — full `values-zh` translation, plus a manual language and theme override in Settings.
 
 ## Requirements
 
-- Android 26+ (AndroidX / Kotlin 2.0 / Jetpack Compose)
-- JDK 17 (Temurin recommended — Gradle 8.9 comes via the included wrapper)
-- Android SDK 34 (`local.properties` → `sdk.dir`)
+- Android 8.0+ (API 26), targets API 36
+- JDK 17 (Temurin recommended — Gradle comes via the included wrapper)
+- Android SDK 36 (`local.properties` → `sdk.dir`)
 
 ## Building
 
@@ -62,39 +65,56 @@ Install the resulting `app/build/outputs/apk/.../app-*.apk` on a device or emula
 ./gradlew app:lintDebug          # Android lint
 ```
 
-GitHub Actions runs tests, the debug build, and lint on every push and pull request. Tagged releases (`v*`) additionally build a release APK and attach it to a GitHub Release.
-
 ## Project structure
 
 ```
 NothingMusic/
 ├── build.gradle.kts           # Root build — declares shared plugins
 ├── settings.gradle.kts        # Gradle multi-project setup
-├── gradlew                    # Gradle wrapper (pinned Gradle 8.9)
+├── gradlew                    # Gradle wrapper
 ├── gradle/
 │   ├── libs.versions.toml     # Version catalog (deps & plugins)
 │   └── wrapper/               # Wrapper jar & properties
 └── app/
-    ├── build.gradle.kts       # App module (Android + Kotlin + Compose)
+    ├── build.gradle.kts       # App module (Android + Kotlin + Compose + KSP)
     ├── proguard-rules.pro     # Keep rules for Room entities & Media3
     └── src/main/
-        ├── AndroidManifest.xml      # Permissions, activities, media service
+        ├── AndroidManifest.xml      # Permissions, activities, media service, artwork provider
         ├── java/com/nothingmusic/
         │   ├── MainActivity.kt      # App entry (Hilt + NavGraph)
-        │   ├── data/                # Room DB, entity/DAO, lyrics, audio scanner
-        │   ├── domain/              # Domain models & repository interface
+        │   ├── data/                # Room DB, repository, lyrics resolution, audio scanner
+        │   ├── domain/              # Domain models & repository interfaces
+        │   ├── remote/              # Remote track <-> playback mapping and hydration
         │   ├── service/             # Playback service, controller, sleep timer
         │   ├── ui/                  # Compose screens, components, theme, navigation
-        │   └── util/                # Constants, file/permission utils, settings
-        └── res/                     # App icon, fonts, themes, strings
+        │   └── util/                # Constants, file/permission utils, settings, theme mode
+        ├── java/com/mica/music/     # Remote-source engine (ported)
+        │   ├── data/remote/         # Source models, credential store, sync engines,
+        │   │                        #   artwork/lyrics transports, playback routing
+        │   │   ├── aliyundrive/     # Aliyun Drive OpenAPI client
+        │   │   ├── alist/           # OpenList / AList v3 client
+        │   │   ├── navidrome/       # Navidrome (Subsonic) client
+        │   │   ├── webdav/          # WebDAV client
+        │   │   └── smb/             # SMB client
+        │   └── media/               # MicaRoutingDataSource (mica-remote:// routing)
+        └── res/                     # App icon, fonts, themes, strings (+ values-zh)
 ```
 
 ## Architecture
 
-- **Hilt** wires the app together (`di/AppModule.kt`): a singleton `MusicRepositoryImpl` owns the Room database, the `AudioScanner` indexes files into it, and `PlayerViewModel` exposes player state to the Compose UI.
-- **PlaybackService** (`service/PlaybackService.kt`) is an AndroidX foreground service that owns the ExoPlayer `PlayerController` and media session, decoupled from the UI.
-- **Navigation** uses `androidx.navigation.compose` (`ui/navigation/NavGraph.kt`) with routes for Library, Search, Settings, Now Playing, Queue, Equalizer, Folder Picker, Album detail and Playlist detail.
-- **Theme** (`ui/theme/`) is a custom monochrome Material 3 theme with a dot-matrix display font.
+- **Hilt** wires the app together (`di/AppModule.kt`): a singleton `MusicRepositoryImpl` owns the local Room database, the `AudioScanner` indexes files into it, and `PlayerViewModel` exposes player state to the Compose UI.
+- **Remote catalog** lives in its own Room database (`RemoteDatabase`) behind `RemoteCatalogRepository`. Each source type has a sync engine (`AliyunDriveSourceSync`, `AListSourceSync`, WebDAV, SMB) that walks the remote tree and atomically publishes a catalog snapshot; metadata and artwork are probed lazily, only when a track is played.
+- **Playback** goes through `MicaRoutingDataSource`, which routes `mica-remote://` URIs to a short-lived signed URL resolved by the matching source adapter. `PlaybackService` (`service/PlaybackService.kt`) is a foreground service owning the ExoPlayer `PlayerController` and media session, decoupled from the UI.
+- **Credentials** for remote sources are kept in `AndroidKeystoreRemoteCredentialStore`, never in plain preferences.
+- **Lyrics** resolve through `LrcLyricsResolver`: embedded tags → sidecar file → LRCLIB online lookup, cached on disk per revision.
+- **Navigation** uses `androidx.navigation.compose` (`ui/navigation/NavGraph.kt`) with routes for Library, Cloud, Cloud Sources, Settings, Now Playing, Queue, Equalizer, Folder Picker, Album detail and Playlist detail.
+- **Theme** (`ui/theme/`) is a custom monochrome Material 3 theme with a dot-matrix display font, plus a manual dark/light override.
+
+## Notes on self-hosted sources
+
+- **OpenList / AList**: the app talks to the AList v3 API. Enter the server as `http(s)://host:port` — a path or query string is rejected. Leave username and password empty only if guest access is enabled on the server; otherwise use an account that can read the music folder.
+- **Self-signed / plain HTTP**: self-hosted servers usually run on `http://` with a local IP, which Android blocks by default on API 28+. The app opts into cleartext traffic for this reason.
+- **Aliyun Drive** requires a `refresh_token`; automatic refresh is delegated to a relay endpoint because individual developer credentials are not available.
 
 ## Contributing
 
