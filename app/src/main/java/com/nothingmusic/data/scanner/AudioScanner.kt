@@ -5,6 +5,8 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import com.mica.music.data.scanner.JAudioTaggerReader
+import com.nothingmusic.data.artwork.FolderArtwork
+import com.nothingmusic.data.artwork.LocalArtworkStore
 import com.nothingmusic.domain.model.Track
 import com.nothingmusic.util.Constants
 import com.nothingmusic.util.SafUtils
@@ -17,12 +19,19 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /**
+ * 扫描器元数据逻辑版本。新增/修改标签或封面解析后递增，旧缓存行会在下次扫描时重读。
+ */
+internal const val SCANNER_METADATA_VERSION = 1
+
+/**
  * 基于 SAF 的本地扫描：遍历用户授权的目录树，文档 URI 直接作为播放 URI。
  * 已缓存的曲目按大小 + 修改时间跳过标签解析，只有新增/变更文件才会走 jaudiotagger。
+ * 封面优先取内嵌图片（按内容哈希落盘），缺失时回退同目录的 cover/folder 等侧挂图片。
  */
 @Singleton
 class AudioScanner @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val artworkStore: LocalArtworkStore,
 ) {
 
     data class FolderScan(
@@ -69,6 +78,7 @@ class AudioScanner @Inject constructor(
     ): Boolean {
         if (depth > MAX_DEPTH) return true
         val children = runCatching { directory.listFiles() }.getOrNull() ?: return false
+        val folderCover = folderCoverUri(children)
         var complete = true
         for (child in children) {
             currentCoroutineContext().ensureActive()
@@ -81,15 +91,31 @@ class AudioScanner @Inject constructor(
                     val cached = known[uri]
                     val size = child.length()
                     val lastModified = child.lastModified()
+                    // 之前没有封面但现在目录里出现了 cover 时也要重读一次。
                     val reusable = cached != null &&
                         lastModified > 0 &&
                         cached.lastModified == lastModified &&
-                        cached.sizeBytes == size
-                    out += if (reusable) cached else readTrack(child, folderUri, uri, size, lastModified)
+                        cached.sizeBytes == size &&
+                        (cached.albumArtUri != null || folderCover == null)
+                    out += if (reusable) {
+                        cached
+                    } else {
+                        readTrack(child, folderUri, uri, size, lastModified, folderCover)
+                    }
                 }
             }
         }
         return complete
+    }
+
+    /** 侧挂封面带上修改时间，文件被替换后 Coil 的 URI 缓存会自然失效。 */
+    private fun folderCoverUri(children: Array<DocumentFile>): String? {
+        val name = FolderArtwork.pick(children.mapNotNull { it.name }) ?: return null
+        val cover = children.firstOrNull { it.isFile && it.name == name } ?: return null
+        return cover.uri.buildUpon()
+            .appendQueryParameter("v", cover.lastModified().toString())
+            .build()
+            .toString()
     }
 
     private fun readTrack(
@@ -98,12 +124,14 @@ class AudioScanner @Inject constructor(
         uri: String,
         size: Long,
         lastModified: Long,
+        folderArtworkUri: String?,
     ): Track {
         val name = document.name ?: "audio"
         val extension = name.substringAfterLast('.', "").lowercase()
         val tags = runCatching { JAudioTaggerReader.read(context, document.uri) }.getOrNull()
         val durationMs = tags?.durationSec?.takeIf { it > 0 }?.times(1000L)
             ?: readDurationMs(document.uri)
+        val embeddedArtwork = tags?.frontCoverBytes?.let(artworkStore::store)?.toString()
         return Track(
             id = SafUtils.stableTrackId(uri),
             title = tags?.title?.takeIf { it.isNotBlank() } ?: name.substringBeforeLast('.'),
@@ -111,7 +139,7 @@ class AudioScanner @Inject constructor(
             album = tags?.album?.takeIf { it.isNotBlank() } ?: UNKNOWN_ALBUM,
             durationMs = durationMs,
             path = uri,
-            albumArtUri = null,
+            albumArtUri = (embeddedArtwork ?: folderArtworkUri)?.let(Uri::parse),
             folderPath = folderUri,
             dateAdded = lastModified / 1000,
             trackNumber = tags?.trackNumber ?: 0,

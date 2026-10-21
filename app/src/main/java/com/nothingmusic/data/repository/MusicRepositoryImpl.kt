@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
+import com.nothingmusic.data.artwork.LocalArtworkStore
 import com.nothingmusic.data.local.dao.FavoriteDao
 import com.nothingmusic.data.local.dao.PlaylistDao
 import com.nothingmusic.data.local.dao.ScannedFolderDao
@@ -15,6 +16,7 @@ import com.nothingmusic.data.local.entity.ScannedFolderEntity
 import com.nothingmusic.data.local.entity.TrackEntity
 import com.nothingmusic.data.lyrics.LrcLyricsResolver
 import com.nothingmusic.data.scanner.AudioScanner
+import com.nothingmusic.data.scanner.SCANNER_METADATA_VERSION
 import com.nothingmusic.domain.model.Album
 import com.nothingmusic.domain.model.Artist
 import com.nothingmusic.domain.model.Folder
@@ -35,6 +37,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 @Singleton
@@ -45,9 +49,11 @@ class MusicRepositoryImpl @Inject constructor(
     private val scannedFolderDao: ScannedFolderDao,
     private val favoriteDao: FavoriteDao,
     private val trackDao: TrackDao,
+    private val artworkStore: LocalArtworkStore,
 ) : MusicRepository {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val refreshMutex = Mutex()
 
     override val tracks: StateFlow<List<Track>> =
         trackDao.observeAll()
@@ -116,14 +122,21 @@ class MusicRepositoryImpl @Inject constructor(
         }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override suspend fun refreshLibrary(scannedFolders: List<String>) {
+        refreshMutex.withLock { refreshLocked(scannedFolders) }
+    }
+
+    private suspend fun refreshLocked(scannedFolders: List<String>) {
         val roots = (scannedFolders.ifEmpty { getAllScannedFolderPaths() })
             .filter { it.startsWith("content://") }
         if (roots.isEmpty()) {
             trackDao.deleteAll()
+            pruneArtwork()
             return
         }
         val cachedRows = trackDao.getAll()
-        val known = cachedRows.associate { it.uri to it.toDomain() }
+        val known = cachedRows
+            .filter { it.metadataVersion >= SCANNER_METADATA_VERSION }
+            .associate { it.uri to it.toDomain() }
         val scans = scanner.scanFolders(roots, known)
 
         for (scan in scans) {
@@ -138,6 +151,11 @@ class MusicRepositoryImpl @Inject constructor(
             stale.chunked(SQLITE_BATCH).forEach { trackDao.deleteByUris(it) }
         }
         trackDao.deleteOutsideFolders(roots)
+        pruneArtwork()
+    }
+
+    private suspend fun pruneArtwork() {
+        artworkStore.prune(trackDao.getAll().mapNotNull { it.artworkUri }.toSet())
     }
 
     override suspend fun getAllScannedFolderPaths(): List<String> = scannedFolderDao.getAllPaths()
@@ -165,9 +183,12 @@ class MusicRepositoryImpl @Inject constructor(
     }
 
     override suspend fun removeScannedFolder(path: String) {
-        scannedFolderDao.delete(path)
-        trackDao.deleteByFolder(path)
-        releasePersistablePermission(path)
+        refreshMutex.withLock {
+            scannedFolderDao.delete(path)
+            trackDao.deleteByFolder(path)
+            releasePersistablePermission(path)
+            pruneArtwork()
+        }
     }
 
     override suspend fun getAllTracks(): List<Track> = trackDao.getAll().map(TrackEntity::toDomain)
@@ -296,4 +317,5 @@ private fun Track.toEntity(): TrackEntity = TrackEntity(
     sampleRate = sampleRate,
     bitrate = bitrate,
     artworkUri = albumArtUri?.toString(),
+    metadataVersion = SCANNER_METADATA_VERSION,
 )

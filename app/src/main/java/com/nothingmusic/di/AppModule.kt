@@ -1,6 +1,7 @@
 package com.nothingmusic.di
 
 import android.content.Context
+import com.nothingmusic.data.artwork.LocalArtworkStore
 import com.nothingmusic.data.local.AppDatabase
 import com.nothingmusic.data.local.dao.FavoriteDao
 import com.nothingmusic.data.local.dao.PlaylistDao
@@ -49,11 +50,6 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideAudioScanner(@ApplicationContext context: Context): AudioScanner =
-        AudioScanner(context)
-
-    @Provides
-    @Singleton
     fun provideMusicRepository(
         @ApplicationContext context: Context,
         scanner: AudioScanner,
@@ -61,6 +57,7 @@ object AppModule {
         scannedFolderDao: ScannedFolderDao,
         favoriteDao: FavoriteDao,
         trackDao: TrackDao,
+        artworkStore: LocalArtworkStore,
     ): MusicRepository = MusicRepositoryImpl(
         context,
         scanner,
@@ -68,5 +65,6 @@ object AppModule {
         scannedFolderDao,
         favoriteDao,
         trackDao,
+        artworkStore,
     )
 }

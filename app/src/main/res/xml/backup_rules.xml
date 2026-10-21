@@ -2,4 +2,6 @@
 <!-- 凭证密文与 Android Keystore 密钥绑定，恢复到新设备后无法解密，直接排除。 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="mica_remote_credentials_v1.xml" />
+    <!-- 封面缓存可由重新扫描重建，不进备份。 -->
+    <exclude domain="file" path="local_artwork/" />
 </full-backup-content>

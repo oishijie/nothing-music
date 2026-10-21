@@ -65,6 +65,8 @@ data class TrackEntity(
     val sampleRate: Int,
     val bitrate: Int,
     val artworkUri: String?,
+    /** 扫描器元数据版本；低于当前版本的缓存行会在下次扫描时重读，用于补齐新字段。 */
+    @androidx.room.ColumnInfo(defaultValue = "0") val metadataVersion: Int = 0,
 )
 
 @Entity(tableName = "favorites")

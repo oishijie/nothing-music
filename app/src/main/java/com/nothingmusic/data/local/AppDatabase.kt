@@ -27,7 +27,7 @@ import com.nothingmusic.data.local.entity.TrackEntity
         SearchHistoryEntity::class,
         TrackEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -83,13 +83,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v3：tracks 增加元数据版本；旧行默认 0，低于扫描器当前版本，会在下次扫描时重读以补齐封面等字段。
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE tracks ADD COLUMN metadataVersion INTEGER NOT NULL DEFAULT 0",
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "nothing_music.db",
-                ).addMigrations(MIGRATION_1_2).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
             }
         }
     }
