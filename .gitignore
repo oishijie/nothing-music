@@ -1,0 +1,28 @@
+# Gradle
+.gradle/
+build/
+app/build/
+*.apk
+*.aab
+*.keystore
+
+# Kotlin
+.kotlin/
+
+# Android
+local.properties
+keystore.properties
+.idea/
+*.iml
+.cxx/
+captures/
+
+# Tooling
+.freebuff/
+
+# macOS
+.DS_Store
+*~
+
+# Logs
+*.log

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- NothingOS glyph-style music note, red on black -->
+    <group
+        android:translateX="54"
+        android:translateY="54">
+        <path
+            android:fillColor="#FF0044"
+            android:pathData="M-8,-20 C-12,-22 -16,-22 -20,-20 L-20,-4 L-20,18 C-25,16 -30,20 -30,26 C-30,32 -25,37 -19,37 C-13,37 -8,32 -8,26 L-8,-12 L12,-16 L12,18 C7,16 2,20 2,26 C2,32 7,37 13,37 C19,37 24,32 24,26 C24,20 19,16 13,16 L12,16 L12,-12 C12,-18 8,-20 -8,-20 Z" />
+    </group>
+</vector>
