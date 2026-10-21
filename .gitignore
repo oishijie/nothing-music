@@ -26,5 +26,3 @@ captures/
 
 # Logs
 *.log
-# CI（token 无 workflow scope）
-.github/workflows/

@@ -1,6 +1,8 @@
 package com.nothingmusic.remote
 
 import android.content.Context
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import com.mica.music.RemoteRuntime
 import com.mica.music.data.remote.CompositeRemoteHttpPlaybackRequestResolver
@@ -19,6 +21,7 @@ object RemotePlayback {
 
     const val URI_SCHEME = "mica-remote"
 
+    @OptIn(UnstableApi::class)
     fun resolveDataSourceFactory(context: Context): DataSource.Factory {
         RemoteRuntime.install(context)
         val ownerById: suspend (String) -> com.mica.music.data.remote.RemoteSourceOwner? = { sourceId ->

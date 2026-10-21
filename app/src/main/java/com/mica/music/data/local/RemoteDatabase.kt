@@ -18,7 +18,7 @@ import androidx.room.RoomDatabase
         RemoteSmbScopeTrackEntity::class,
     ],
     version = 1,
-    exportSchema = false,
+    exportSchema = true,
 )
 abstract class RemoteDatabase : RoomDatabase() {
 
@@ -42,7 +42,7 @@ abstract class RemoteDatabase : RoomDatabase() {
                     context.applicationContext,
                     RemoteDatabase::class.java,
                     NAME,
-                ).fallbackToDestructiveMigration().build().also { instance = it }
+                ).build().also { instance = it }
             }
     }
 }
