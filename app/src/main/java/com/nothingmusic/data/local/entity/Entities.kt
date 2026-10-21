@@ -53,6 +53,10 @@ data class TrackEntity(
     val title: String,
     val artist: String,
     val album: String,
+    /** 专辑艺术家；空白时按曲目艺术家聚合。 */
+    @androidx.room.ColumnInfo(defaultValue = "") val albumArtist: String = "",
+    /** 碟号；0 表示未知。 */
+    @androidx.room.ColumnInfo(defaultValue = "0") val discNumber: Int = 0,
     val durationMs: Long,
     /** 所属树 URI，用于按文件夹筛选与增量清理。 */
     val folderUri: String,

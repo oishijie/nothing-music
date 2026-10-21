@@ -55,7 +55,7 @@ fun AlbumDetailScreen(
     val currentTrack by playerViewModel.currentTrack.collectAsState()
     val isPlaying by playerViewModel.isPlaying.collectAsState()
 
-    val albumTracks = tracks.filter { it.album == albumName && it.artist == albumArtist }
+    val albumTracks = tracks.filter { it.album == albumName && it.resolvedAlbumArtist == albumArtist }
     val album = Album(
         name = albumName,
         artist = albumArtist,

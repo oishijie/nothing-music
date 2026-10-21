@@ -78,7 +78,7 @@ interface ScannedFolderDao {
 interface TrackDao {
     @Query(
         "SELECT * FROM tracks ORDER BY artist COLLATE NOCASE, " +
-            "album COLLATE NOCASE, trackNumber, title COLLATE NOCASE"
+            "album COLLATE NOCASE, discNumber, trackNumber, title COLLATE NOCASE"
     )
     fun observeAll(): Flow<List<com.nothingmusic.data.local.entity.TrackEntity>>
 

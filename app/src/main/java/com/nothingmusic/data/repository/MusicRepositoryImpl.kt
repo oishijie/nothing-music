@@ -23,6 +23,7 @@ import com.nothingmusic.domain.model.Folder
 import com.nothingmusic.domain.model.Lyrics
 import com.nothingmusic.domain.model.Playlist
 import com.nothingmusic.domain.model.Track
+import com.nothingmusic.domain.model.groupIntoAlbums
 import com.nothingmusic.domain.repository.MusicRepository
 import com.nothingmusic.util.SafUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -65,20 +66,8 @@ class MusicRepositoryImpl @Inject constructor(
             .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override val albums: StateFlow<List<Album>> =
-        tracks.map { list ->
-            list.groupBy { it.album to it.artist }
-                .map { (key, groupTracks) ->
-                    Album(
-                        name = key.first,
-                        artist = key.second,
-                        albumArtUri = groupTracks.firstNotNullOfOrNull { it.albumArtUri?.toString() },
-                        trackCount = groupTracks.size,
-                        year = groupTracks.firstOrNull()?.year ?: 0,
-                        durationMs = groupTracks.sumOf { it.durationMs },
-                    )
-                }
-                .sortedBy { it.name.lowercase() }
-        }.stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        tracks.map { list -> list.groupIntoAlbums() }
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override val artists: StateFlow<List<Artist>> =
         tracks.map { list ->
@@ -86,7 +75,10 @@ class MusicRepositoryImpl @Inject constructor(
                 .map { (name, groupTracks) ->
                     Artist(
                         name = name,
-                        albumCount = groupTracks.map { it.album }.distinct().size,
+                        albumCount = groupTracks
+                            .map { it.album to it.resolvedAlbumArtist }
+                            .distinct()
+                            .size,
                         trackCount = groupTracks.size,
                         avatarUri = groupTracks.firstNotNullOfOrNull { it.albumArtUri?.toString() },
                     )
@@ -223,6 +215,7 @@ class MusicRepositoryImpl @Inject constructor(
                     it.title.lowercase().contains(q) ||
                         it.artist.lowercase().contains(q) ||
                         it.album.lowercase().contains(q) ||
+                        it.albumArtist.lowercase().contains(q) ||
                         it.documentName.lowercase().contains(q)
                 }
             }
@@ -284,6 +277,8 @@ private fun TrackEntity.toDomain(): Track = Track(
     title = title,
     artist = artist,
     album = album,
+    albumArtist = albumArtist,
+    discNumber = discNumber,
     durationMs = durationMs,
     path = uri,
     albumArtUri = artworkUri?.let(Uri::parse),
@@ -306,6 +301,8 @@ private fun Track.toEntity(): TrackEntity = TrackEntity(
     title = title,
     artist = artist,
     album = album,
+    albumArtist = albumArtist,
+    discNumber = discNumber,
     durationMs = durationMs,
     folderUri = folderPath,
     dateAdded = dateAdded,

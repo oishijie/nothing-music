@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
 /**
  * 扫描器元数据逻辑版本。新增/修改标签或封面解析后递增，旧缓存行会在下次扫描时重读。
  */
-internal const val SCANNER_METADATA_VERSION = 1
+internal const val SCANNER_METADATA_VERSION = 2
 
 /**
  * 基于 SAF 的本地扫描：遍历用户授权的目录树，文档 URI 直接作为播放 URI。
@@ -150,6 +150,8 @@ class AudioScanner @Inject constructor(
             bitrate = tags?.bitrateKbps ?: 0,
             lastModified = lastModified,
             documentName = name,
+            albumArtist = tags?.albumArtist.orEmpty(),
+            discNumber = tags?.discNumber ?: 0,
         )
     }
 
