@@ -71,6 +71,11 @@ data class TrackEntity(
     val artworkUri: String?,
     /** 扫描器元数据版本；低于当前版本的缓存行会在下次扫描时重读，用于补齐新字段。 */
     @androidx.room.ColumnInfo(defaultValue = "0") val metadataVersion: Int = 0,
+    /**
+     * 远程曲目的 opaque mediaId；空串表示本地 SAF 曲目。
+     * 远程行只在收藏/入歌单时写入，是独立于远程目录库的元数据快照，扫描清理不会碰它。
+     */
+    @androidx.room.ColumnInfo(defaultValue = "") val remoteId: String = "",
 )
 
 @Entity(tableName = "favorites")

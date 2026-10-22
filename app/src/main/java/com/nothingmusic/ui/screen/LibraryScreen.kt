@@ -87,6 +87,7 @@ import com.nothingmusic.util.FileUtils
 
 private enum class LibraryTab(val label: String) {
     Songs("Songs"),
+    Favorites("Favorites"),
     Playlists("Playlists"),
     Artists("Artists"),
     Folders("Folders"),
@@ -107,6 +108,7 @@ fun LibraryScreen(
     val folders by viewModel.folders.collectAsState()
     val hasScannedFolders by viewModel.hasScannedFolders.collectAsState()
     val favoriteIds by viewModel.favoriteIds.collectAsState()
+    val favoriteTracks by viewModel.favoriteTracks.collectAsState()
     val currentTrack by playerViewModel.currentTrack.collectAsState()
     val isPlaying by playerViewModel.isPlaying.collectAsState()
 
@@ -211,6 +213,17 @@ fun LibraryScreen(
                         isPlaying = isPlaying,
                         hasScannedFolders = hasScannedFolders,
                         onPickFolders = onNavigateToFolderPicker,
+                        onPlay = { track, trackList ->
+                            playerViewModel.playTrack(track, trackList)
+                            onNavigateToNowPlaying()
+                        },
+                        onToggleFavorite = viewModel::toggleFavorite,
+                    )
+                    LibraryTab.Favorites -> FavoritesTab(
+                        tracks = favoriteTracks,
+                        favoriteIds = favoriteIds,
+                        currentTrack = currentTrack,
+                        isPlaying = isPlaying,
                         onPlay = { track, trackList ->
                             playerViewModel.playTrack(track, trackList)
                             onNavigateToNowPlaying()
@@ -400,6 +413,50 @@ private fun SongsTab(
                 isPlaying = isPlaying,
                 isFavorite = track.id in favSet,
                 onClick = { onPlay(track, tracks) },
+                onFavoriteClick = { onToggleFavorite(track) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FavoritesTab(
+    tracks: List<Track>,
+    favoriteIds: List<Long>,
+    currentTrack: Track?,
+    isPlaying: Boolean,
+    onPlay: (Track, List<Track>) -> Unit,
+    onToggleFavorite: (Track) -> Unit,
+) {
+    val favSet = remember(favoriteIds) { favoriteIds.toSet() }
+
+    if (tracks.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                text = "No favorite tracks yet.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = DotMatrixFont,
+                textAlign = TextAlign.Center,
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        contentPadding = PaddingValues(bottom = 16.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        itemsIndexed(
+            items = tracks,
+            key = { _, track -> track.id },
+        ) { _, track ->
+            TrackListItem(
+                track = track,
+                isCurrent = currentTrack?.id == track.id,
+                isPlaying = isPlaying,
+                isFavorite = track.id in favSet,
+                onClick = { onPlay(track, tracks) },
+                onFavoriteClick = { onToggleFavorite(track) },
             )
         }
     }

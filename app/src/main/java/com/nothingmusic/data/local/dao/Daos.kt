@@ -37,6 +37,13 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position")
     fun observeTracksInPlaylist(playlistId: Long): Flow<List<PlaylistTrackEntity>>
 
+    /** 歌单内容按 position 排序；远程曲目依赖收藏/歌单时写入的快照行。 */
+    @Query(
+        "SELECT t.* FROM tracks t INNER JOIN playlist_tracks pt ON pt.trackId = t.id " +
+            "WHERE pt.playlistId = :playlistId ORDER BY pt.position"
+    )
+    fun observeTracksForPlaylist(playlistId: Long): Flow<List<com.nothingmusic.data.local.entity.TrackEntity>>
+
     @Query("SELECT * FROM playlist_tracks WHERE playlistId = :playlistId ORDER BY position")
     suspend fun getTracksInPlaylist(playlistId: Long): List<PlaylistTrackEntity>
 
@@ -76,11 +83,15 @@ interface ScannedFolderDao {
 
 @Dao
 interface TrackDao {
+    /** 本地曲库只包含 SAF 扫描行；远程快照行仅通过收藏/歌单解析。 */
     @Query(
-        "SELECT * FROM tracks ORDER BY artist COLLATE NOCASE, " +
+        "SELECT * FROM tracks WHERE remoteId = '' ORDER BY artist COLLATE NOCASE, " +
             "album COLLATE NOCASE, discNumber, trackNumber, title COLLATE NOCASE"
     )
-    fun observeAll(): Flow<List<com.nothingmusic.data.local.entity.TrackEntity>>
+    fun observeLocal(): Flow<List<com.nothingmusic.data.local.entity.TrackEntity>>
+
+    @Query("SELECT * FROM tracks WHERE remoteId = ''")
+    suspend fun getLocal(): List<com.nothingmusic.data.local.entity.TrackEntity>
 
     @Query("SELECT * FROM tracks")
     suspend fun getAll(): List<com.nothingmusic.data.local.entity.TrackEntity>
@@ -94,23 +105,30 @@ interface TrackDao {
     @Upsert
     suspend fun upsertAll(tracks: List<com.nothingmusic.data.local.entity.TrackEntity>)
 
-    @Query("DELETE FROM tracks WHERE uri IN (:uris)")
-    suspend fun deleteByUris(uris: List<String>)
+    @Query("DELETE FROM tracks WHERE remoteId = '' AND uri IN (:uris)")
+    suspend fun deleteLocalByUris(uris: List<String>)
 
-    @Query("DELETE FROM tracks WHERE folderUri = :folderUri")
-    suspend fun deleteByFolder(folderUri: String)
+    @Query("DELETE FROM tracks WHERE remoteId = '' AND folderUri = :folderUri")
+    suspend fun deleteLocalByFolder(folderUri: String)
 
-    @Query("DELETE FROM tracks WHERE folderUri NOT IN (:folders)")
-    suspend fun deleteOutsideFolders(folders: List<String>)
+    @Query("DELETE FROM tracks WHERE remoteId = '' AND folderUri NOT IN (:folders)")
+    suspend fun deleteLocalOutsideFolders(folders: List<String>)
 
-    @Query("DELETE FROM tracks")
-    suspend fun deleteAll()
+    @Query("DELETE FROM tracks WHERE remoteId = ''")
+    suspend fun deleteAllLocal()
 }
 
 @Dao
 interface FavoriteDao {
     @Query("SELECT trackId FROM favorites ORDER BY addedAt DESC")
     fun observeFavoriteIds(): Flow<List<Long>>
+
+    /** 收藏列表同样走 tracks 快照，本地与远程曲目一视同仁。 */
+    @Query(
+        "SELECT t.* FROM tracks t INNER JOIN favorites f ON f.trackId = t.id " +
+            "ORDER BY f.addedAt DESC"
+    )
+    fun observeFavoriteTracks(): Flow<List<com.nothingmusic.data.local.entity.TrackEntity>>
 
     @Query("SELECT trackId FROM favorites")
     suspend fun getFavoriteIds(): List<Long>

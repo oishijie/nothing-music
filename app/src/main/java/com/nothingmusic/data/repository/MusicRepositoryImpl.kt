@@ -14,6 +14,8 @@ import com.nothingmusic.data.local.entity.PlaylistEntity
 import com.nothingmusic.data.local.entity.PlaylistTrackEntity
 import com.nothingmusic.data.local.entity.ScannedFolderEntity
 import com.nothingmusic.data.local.entity.TrackEntity
+import com.nothingmusic.data.local.toDomain
+import com.nothingmusic.data.local.toEntity
 import com.nothingmusic.data.lyrics.LrcLyricsResolver
 import com.nothingmusic.data.scanner.AudioScanner
 import com.nothingmusic.data.scanner.SCANNER_METADATA_VERSION
@@ -57,12 +59,17 @@ class MusicRepositoryImpl @Inject constructor(
     private val refreshMutex = Mutex()
 
     override val tracks: StateFlow<List<Track>> =
-        trackDao.observeAll()
+        trackDao.observeLocal()
             .map { rows -> rows.map(TrackEntity::toDomain) }
             .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override val favoriteIds: StateFlow<List<Long>> =
         favoriteDao.observeFavoriteIds()
+            .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    override val favoriteTracks: StateFlow<List<Track>> =
+        favoriteDao.observeFavoriteTracks()
+            .map { rows -> rows.map(TrackEntity::toDomain) }
             .stateIn(scope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     override val albums: StateFlow<List<Album>> =
@@ -121,11 +128,11 @@ class MusicRepositoryImpl @Inject constructor(
         val roots = (scannedFolders.ifEmpty { getAllScannedFolderPaths() })
             .filter { it.startsWith("content://") }
         if (roots.isEmpty()) {
-            trackDao.deleteAll()
+            trackDao.deleteAllLocal()
             pruneArtwork()
             return
         }
-        val cachedRows = trackDao.getAll()
+        val cachedRows = trackDao.getLocal()
         val known = cachedRows
             .filter { it.metadataVersion >= SCANNER_METADATA_VERSION }
             .associate { it.uri to it.toDomain() }
@@ -140,14 +147,14 @@ class MusicRepositoryImpl @Inject constructor(
             val stale = cachedRows
                 .filter { it.folderUri == scan.folderUri && it.uri !in scannedUris }
                 .map { it.uri }
-            stale.chunked(SQLITE_BATCH).forEach { trackDao.deleteByUris(it) }
+            stale.chunked(SQLITE_BATCH).forEach { trackDao.deleteLocalByUris(it) }
         }
-        trackDao.deleteOutsideFolders(roots)
+        trackDao.deleteLocalOutsideFolders(roots)
         pruneArtwork()
     }
 
     private suspend fun pruneArtwork() {
-        artworkStore.prune(trackDao.getAll().mapNotNull { it.artworkUri }.toSet())
+        artworkStore.prune(trackDao.getLocal().mapNotNull { it.artworkUri }.toSet())
     }
 
     override suspend fun getAllScannedFolderPaths(): List<String> = scannedFolderDao.getAllPaths()
@@ -168,7 +175,7 @@ class MusicRepositoryImpl @Inject constructor(
         // 新加的父目录覆盖已选中的子目录，移除子目录避免重复计数。
         existing.filter { it != path && SafUtils.isNestedTree(it, path) }.forEach { child ->
             scannedFolderDao.delete(child)
-            trackDao.deleteByFolder(child)
+            trackDao.deleteLocalByFolder(child)
             releasePersistablePermission(child)
         }
         refreshLibrary(getAllScannedFolderPaths())
@@ -177,13 +184,13 @@ class MusicRepositoryImpl @Inject constructor(
     override suspend fun removeScannedFolder(path: String) {
         refreshMutex.withLock {
             scannedFolderDao.delete(path)
-            trackDao.deleteByFolder(path)
+            trackDao.deleteLocalByFolder(path)
             releasePersistablePermission(path)
             pruneArtwork()
         }
     }
 
-    override suspend fun getAllTracks(): List<Track> = trackDao.getAll().map(TrackEntity::toDomain)
+    override suspend fun getAllTracks(): List<Track> = trackDao.getLocal().map(TrackEntity::toDomain)
 
     override suspend fun trackById(id: Long): Track? = trackDao.getById(id)?.toDomain()
 
@@ -195,13 +202,18 @@ class MusicRepositoryImpl @Inject constructor(
         return ids.mapNotNull { byId[it]?.toDomain() }
     }
 
-    override fun observePlaylistTrackIds(playlistId: Long): Flow<List<Long>> =
-        playlistDao.observeTracksInPlaylist(playlistId).map { list -> list.map { it.trackId } }
+    override fun observePlaylistTracks(playlistId: Long): Flow<List<Track>> =
+        playlistDao.observeTracksForPlaylist(playlistId)
+            .map { rows -> rows.map(TrackEntity::toDomain) }
 
-    override suspend fun toggleFavorite(trackId: Long) {
+    override suspend fun toggleFavorite(track: Track) {
         val favorites = favoriteDao.getFavoriteIds()
-        if (trackId in favorites) favoriteDao.delete(trackId)
-        else favoriteDao.insert(FavoriteEntity(trackId = trackId))
+        if (track.id in favorites) {
+            favoriteDao.delete(track.id)
+        } else {
+            if (track.isRemote) trackDao.upsertAll(listOf(track.toEntity()))
+            favoriteDao.insert(FavoriteEntity(trackId = track.id))
+        }
     }
 
     override suspend fun isFavorite(trackId: Long): Boolean = trackId in favoriteDao.getFavoriteIds()
@@ -226,18 +238,22 @@ class MusicRepositoryImpl @Inject constructor(
 
     override suspend fun deletePlaylist(id: Long) = playlistDao.deletePlaylist(id)
 
-    override suspend fun addToPlaylist(playlistId: Long, trackIds: List<Long>) {
+    override suspend fun addToPlaylist(playlistId: Long, tracks: List<Track>) {
         val existing = playlistDao.getTracksInPlaylist(playlistId).map { it.trackId }.toSet()
+        val additions = tracks.distinctBy { it.id }.filterNot { it.id in existing }
+        if (additions.isEmpty()) return
+        val remoteRows = additions.filter { it.isRemote }.map { it.toEntity() }
+        if (remoteRows.isNotEmpty()) trackDao.upsertAll(remoteRows)
         val startPosition = playlistDao.countTracks(playlistId)
-        val tracks = trackIds.filterNot { it in existing }
-            .mapIndexed { index, trackId ->
+        playlistDao.insertTracks(
+            additions.mapIndexed { index, track ->
                 PlaylistTrackEntity(
                     playlistId = playlistId,
-                    trackId = trackId,
+                    trackId = track.id,
                     position = startPosition + index,
                 )
-            }
-        if (tracks.isNotEmpty()) playlistDao.insertTracks(tracks)
+            },
+        )
     }
 
     override suspend fun renamePlaylist(id: Long, newName: String) =
@@ -271,48 +287,3 @@ class MusicRepositoryImpl @Inject constructor(
         const val SQLITE_BATCH = 500
     }
 }
-
-private fun TrackEntity.toDomain(): Track = Track(
-    id = id,
-    title = title,
-    artist = artist,
-    album = album,
-    albumArtist = albumArtist,
-    discNumber = discNumber,
-    durationMs = durationMs,
-    path = uri,
-    albumArtUri = artworkUri?.let(Uri::parse),
-    folderPath = folderUri,
-    dateAdded = dateAdded,
-    trackNumber = trackNumber,
-    year = year,
-    mimeType = mimeType,
-    sizeBytes = sizeBytes,
-    sampleRate = sampleRate,
-    bitrate = bitrate,
-    lastModified = lastModified,
-    documentName = documentName,
-)
-
-private fun Track.toEntity(): TrackEntity = TrackEntity(
-    id = id,
-    uri = path,
-    documentName = documentName,
-    title = title,
-    artist = artist,
-    album = album,
-    albumArtist = albumArtist,
-    discNumber = discNumber,
-    durationMs = durationMs,
-    folderUri = folderPath,
-    dateAdded = dateAdded,
-    trackNumber = trackNumber,
-    year = year,
-    mimeType = mimeType,
-    sizeBytes = sizeBytes,
-    lastModified = lastModified,
-    sampleRate = sampleRate,
-    bitrate = bitrate,
-    artworkUri = albumArtUri?.toString(),
-    metadataVersion = SCANNER_METADATA_VERSION,
-)
