@@ -82,4 +82,9 @@
     <string name="search_result_count">%1$d 个结果</string>
     <string name="search_hint_library_size">曲库共 %1$d 首，输入关键字开始搜索</string>
     <string name="search_hint_cloud_size">云盘共 %1$d 首，输入关键字开始搜索</string>
+    <string name="search_hint_all_sources">搜索本地与云盘曲目</string>
+    <string name="search_section_local">本地</string>
+    <string name="add_to_playlist">添加到歌单</string>
+    <string name="add_to_playlist_title">将「%1$s」添加到</string>
+    <string name="add_to_playlist_empty">请先在音乐页创建歌单</string>
 </resources>

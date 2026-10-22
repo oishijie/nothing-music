@@ -82,4 +82,9 @@
     <string name="search_result_count">%1$d results</string>
     <string name="search_hint_library_size">Library has %1$d tracks. Type a keyword to search.</string>
     <string name="search_hint_cloud_size">Cloud library has %1$d tracks. Type a keyword to search.</string>
+    <string name="search_hint_all_sources">Search local and cloud tracks</string>
+    <string name="search_section_local">LOCAL</string>
+    <string name="add_to_playlist">Add to playlist</string>
+    <string name="add_to_playlist_title">Add &quot;%1$s&quot; to</string>
+    <string name="add_to_playlist_empty">Create a playlist in the library first.</string>
 </resources>
