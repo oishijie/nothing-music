@@ -201,6 +201,7 @@ fun PlaylistDetailScreen(
                             playerViewModel.playTrack(track, tracks)
                             onNavigateToNowPlaying()
                         },
+                        onFavoriteClick = { viewModel.toggleFavorite(track) },
                         trailingContent = {
                             IconButton(
                                 onClick = { viewModel.removeTrackFromPlaylist(playlistId, track.id) },
@@ -234,8 +235,8 @@ fun PlaylistDetailScreen(
         AddMusicSheet(
             tracks = allTracks,
             existingIds = tracks.map { it.id }.toSet(),
-            onAdd = { ids ->
-                if (ids.isNotEmpty()) viewModel.addToPlaylist(playlistId, ids)
+            onAdd = { selectedTracks ->
+                if (selectedTracks.isNotEmpty()) viewModel.addToPlaylist(playlistId, selectedTracks)
             },
             onDismiss = { showAddMusic = false },
         )
@@ -312,7 +313,7 @@ fun PlaylistDetailScreen(
 private fun AddMusicSheet(
     tracks: List<Track>,
     existingIds: Set<Long>,
-    onAdd: (List<Long>) -> Unit,
+    onAdd: (List<Track>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
@@ -398,7 +399,7 @@ private fun AddMusicSheet(
         Spacer(modifier = Modifier.height(8.dp))
         Button(
             onClick = {
-                onAdd(selected.toList())
+                onAdd(candidates.filter { it.id in selected })
                 selected = emptySet()
                 onDismiss()
             },

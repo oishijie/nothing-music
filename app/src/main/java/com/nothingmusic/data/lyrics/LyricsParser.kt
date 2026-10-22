@@ -68,6 +68,7 @@ object LyricsParser {
     }
 
     private fun findLrcFile(track: Track): File? {
+        if (track.path.startsWith("content://")) return null
         val baseFile = File(track.path)
         val candidates = listOf(
             baseFile.resolveSibling(track.title + ".lrc"),

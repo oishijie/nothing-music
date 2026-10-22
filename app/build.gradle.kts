@@ -90,6 +90,11 @@ android {
     }
 }
 
+ksp {
+    // 导出 Room schema 快照：CI 校验实体变更必须连同 app/schemas 一起提交，后续迁移测试也依赖它。
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

@@ -12,27 +12,34 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import com.nothingmusic.R
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,9 +49,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.mica.music.RemoteRuntime
 import com.mica.music.data.remote.RemoteTrackSummary
+import com.nothingmusic.domain.model.Playlist
 import com.nothingmusic.domain.model.Track
 import com.nothingmusic.remote.toTrack
 import com.nothingmusic.ui.component.DotMatrixHeaderTitle
@@ -66,6 +76,7 @@ private data class RemoteEntry(val track: Track, val sourceId: String)
 fun RemoteLibraryScreen(
     onPlayTrack: (Track, List<Track>) -> Unit,
     onOpenSources: () -> Unit,
+    viewModel: RemoteLibraryViewModel = hiltViewModel(),
 ) {
     var entries by remember { mutableStateOf<List<RemoteEntry>>(emptyList()) }
     var sourceNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -73,6 +84,10 @@ fun RemoteLibraryScreen(
     var searchOpen by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var selectedSource by remember { mutableStateOf<String?>(null) }
+    var playlistTarget by remember { mutableStateOf<Track?>(null) }
+    val favoriteIds by viewModel.favoriteIds.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
+    val favoriteIdSet = remember(favoriteIds) { favoriteIds.toSet() }
 
     LaunchedEffect(Unit) {
         RemoteRuntime.catalogRepository.observeTracksForEnabledSources()
@@ -227,7 +242,13 @@ fun RemoteLibraryScreen(
                             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                         )
                         val queue = remember(results) { results.map { it.track } }
-                        TrackList(results, onPlay = { onPlayTrack(it, queue) })
+                        TrackList(
+                            entries = results,
+                            favoriteIds = favoriteIdSet,
+                            onPlay = { onPlayTrack(it, queue) },
+                            onToggleFavorite = viewModel::toggleFavorite,
+                            onAddToPlaylist = { playlistTarget = it },
+                        )
                     }
                 }
             }
@@ -235,14 +256,39 @@ fun RemoteLibraryScreen(
             // 选了具体来源就不再分段，直接平铺该来源的曲目。
             selectedSource != null -> {
                 val queue = remember(visible) { visible.map { it.track } }
-                TrackList(visible, onPlay = { onPlayTrack(it, queue) })
+                TrackList(
+                    entries = visible,
+                    favoriteIds = favoriteIdSet,
+                    onPlay = { onPlayTrack(it, queue) },
+                    onToggleFavorite = viewModel::toggleFavorite,
+                    onAddToPlaylist = { playlistTarget = it },
+                )
             }
 
             else -> {
                 val queue = remember(visible) { visible.map { it.track } }
-                GroupedTrackList(visible, sourceNames, onPlay = { onPlayTrack(it, queue) })
+                GroupedTrackList(
+                    entries = visible,
+                    sourceNames = sourceNames,
+                    favoriteIds = favoriteIdSet,
+                    onPlay = { onPlayTrack(it, queue) },
+                    onToggleFavorite = viewModel::toggleFavorite,
+                    onAddToPlaylist = { playlistTarget = it },
+                )
             }
         }
+    }
+
+    playlistTarget?.let { target ->
+        AddToPlaylistDialog(
+            track = target,
+            playlists = playlists,
+            onSelect = { playlist ->
+                viewModel.addToPlaylist(playlist.id, target)
+                playlistTarget = null
+            },
+            onDismiss = { playlistTarget = null },
+        )
     }
 }
 
@@ -264,22 +310,59 @@ private fun CenteredHint(text: String, useDotMatrix: Boolean = false) {
 }
 
 @Composable
-private fun TrackList(entries: List<RemoteEntry>, onPlay: (Track) -> Unit) {
+private fun TrackList(
+    entries: List<RemoteEntry>,
+    favoriteIds: Set<Long>,
+    onPlay: (Track) -> Unit,
+    onToggleFavorite: (Track) -> Unit,
+    onAddToPlaylist: (Track) -> Unit,
+) {
     LazyColumn(Modifier.fillMaxSize()) {
         items(entries, key = { it.track.id }) { entry ->
-            TrackListItem(
+            RemoteTrackRow(
                 track = entry.track,
-                onClick = { onPlay(entry.track) },
+                favoriteIds = favoriteIds,
+                onPlay = onPlay,
+                onToggleFavorite = onToggleFavorite,
+                onAddToPlaylist = onAddToPlaylist,
             )
         }
     }
 }
 
 @Composable
+private fun RemoteTrackRow(
+    track: Track,
+    favoriteIds: Set<Long>,
+    onPlay: (Track) -> Unit,
+    onToggleFavorite: (Track) -> Unit,
+    onAddToPlaylist: (Track) -> Unit,
+) {
+    TrackListItem(
+        track = track,
+        isFavorite = track.id in favoriteIds,
+        onClick = { onPlay(track) },
+        onFavoriteClick = { onToggleFavorite(track) },
+        trailingContent = {
+            IconButton(onClick = { onAddToPlaylist(track) }) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.PlaylistAdd,
+                    contentDescription = "Add to playlist",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+    )
+}
+
+@Composable
 private fun GroupedTrackList(
     entries: List<RemoteEntry>,
     sourceNames: Map<String, String>,
+    favoriteIds: Set<Long>,
     onPlay: (Track) -> Unit,
+    onToggleFavorite: (Track) -> Unit,
+    onAddToPlaylist: (Track) -> Unit,
 ) {
     // 按来源分组，组内保持原始顺序（已经按艺术家/标题排过）。
     val groups = remember(entries, sourceNames) {
@@ -297,13 +380,73 @@ private fun GroupedTrackList(
                 )
             }
             items(groupEntries, key = { it.track.id }) { entry ->
-                TrackListItem(
+                RemoteTrackRow(
                     track = entry.track,
-                    onClick = { onPlay(entry.track) },
+                    favoriteIds = favoriteIds,
+                    onPlay = onPlay,
+                    onToggleFavorite = onToggleFavorite,
+                    onAddToPlaylist = onAddToPlaylist,
                 )
             }
         }
     }
+}
+
+@Composable
+private fun AddToPlaylistDialog(
+    track: Track,
+    playlists: List<Playlist>,
+    onSelect: (Playlist) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Add \"${track.title}\" to",
+                fontFamily = DotMatrixFont,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            if (playlists.isEmpty()) {
+                Text(
+                    text = "Create a playlist in the library first.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    playlists.forEach { playlist ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelect(playlist) }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = playlist.name,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel), fontFamily = DotMatrixFont)
+            }
+        },
+    )
 }
 
 @Composable

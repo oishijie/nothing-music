@@ -5,6 +5,8 @@
     <string name="a_nothingos_inspired_music_player">A NothingOS-inspired music player.\n\n</string>
     <string name="about_nothing_music">About Nothing Music</string>
     <string name="add_folders_in_settings_to_start_listening">Add folders in Settings to start listening</string>
+    <string name="add_folder">Add folder</string>
+    <string name="add_a_folder_to_start_scanning">Add a music folder to start scanning</string>
     <string name="add_music">Add Music</string>
     <string name="album">ALBUM</string>
     <string name="all_tracks_are_already_in_this_playlist">All tracks are already in this playlist.</string>
@@ -13,7 +15,6 @@
     <string name="brand_name">NOTHING MUSIC</string>
     <string name="cancel">CANCEL</string>
     <string name="choose_which_folders_to_scan">Choose which folders to scan</string>
-    <string name="choose_which_folders_to_scan_in_settings">Choose which folders to scan in Settings</string>
     <string name="clear">CLEAR</string>
     <string name="close">CLOSE</string>
     <string name="create">Create</string>
@@ -24,15 +25,16 @@
     <string name="equalizer">EQUALIZER</string>
     <string name="fade_out_and_pause_playback_automatically">Fade out and pause playback automatically</string>
     <string name="folders">Folders</string>
-    <string name="grant_access">GRANT ACCESS</string>
+    <string name="folders_selected_count">%1$d folders selected</string>
+    <string name="folder_track_count">%1$d tracks</string>
     <string name="loading">LOADING...</string>
     <string name="lyrics">LYRICS</string>
-    <string name="make_sure_storage_permission_is_granted">Make sure storage permission is granted</string>
     <string name="manage_folders">Manage Folders</string>
     <string name="music">Music</string>
     <string name="new_playlist">New Playlist</string>
-    <string name="no_audio_folders_found">NO AUDIO FOLDERS FOUND</string>
     <string name="no_folders_scanned">NO FOLDERS SCANNED</string>
+    <string name="no_folders_yet">NO FOLDERS YET</string>
+    <string name="remove_folder">Remove folder</string>
     <string name="no_lyrics_found">NO LYRICS FOUND</string>
     <string name="no_playlists_yet">No playlists yet</string>
     <string name="no_tracks_yet_tap_add_music">No tracks yet. Tap Add Music.</string>
@@ -43,7 +45,6 @@
     <string name="queue">QUEUE</string>
     <string name="rename_playlist">Rename Playlist</string>
     <string name="save">Save</string>
-    <string name="scanning">SCANNING...</string>
     <string name="search">Search</string>
     <string name="search_songs_artists_albums">Search songs, artists, albums...</string>
     <string name="settings">Settings</string>
@@ -54,7 +55,6 @@
     <string name="sleep_timer_remaining">%1$d min remaining</string>
     <string name="sleep_timer_minutes">%1$d minutes</string>
     <string name="start">START</string>
-    <string name="storage_access_is_required_to_read_your_music_fi">Storage access is required to read your music files.</string>
     <string name="surround_sound_effect">Surround sound effect</string>
     <string name="this_cannot_be_undone">This cannot be undone.</string>
     <string name="tracks_ready">TRACKS READY</string>

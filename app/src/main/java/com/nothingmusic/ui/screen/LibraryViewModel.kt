@@ -11,7 +11,6 @@ import com.nothingmusic.domain.repository.MusicRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -44,10 +43,8 @@ class LibraryViewModel @Inject constructor(
     val favoriteIds: StateFlow<List<Long>> = repository.favoriteIds
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val favoriteTracks: StateFlow<List<Track>> = combine(tracks, favoriteIds) { all, favs ->
-        val favSet = favs.toSet()
-        all.filter { it.id in favSet }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val favoriteTracks: StateFlow<List<Track>> = repository.favoriteTracks
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun refresh() {
         viewModelScope.launch {
@@ -65,7 +62,7 @@ class LibraryViewModel @Inject constructor(
 
     fun toggleFavorite(track: Track) {
         viewModelScope.launch {
-            repository.toggleFavorite(track.id)
+            repository.toggleFavorite(track)
         }
     }
 
@@ -75,9 +72,9 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    fun addToPlaylist(playlistId: Long, trackIds: List<Long>) {
+    fun addToPlaylist(playlistId: Long, tracks: List<Track>) {
         viewModelScope.launch {
-            repository.addToPlaylist(playlistId, trackIds)
+            repository.addToPlaylist(playlistId, tracks)
         }
     }
 
@@ -103,9 +100,7 @@ class LibraryViewModel @Inject constructor(
 
     fun tracksFor(playlistId: Long): StateFlow<List<Track>> =
         playlistTrackFlows.getOrPut(playlistId) {
-            combine(tracks, repository.observePlaylistTrackIds(playlistId)) { all, ids ->
-                val byId = all.associateBy { it.id }
-                ids.mapNotNull { byId[it] }
-            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+            repository.observePlaylistTracks(playlistId)
+                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
         }
 }

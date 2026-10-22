@@ -7,8 +7,8 @@ Thanks for your interest in contributing! This document covers everything you ne
 | Tool | Version |
 |------|---------|
 | JDK | 17 (Temurin recommended) |
-| Android SDK | Platform 34, Build-Tools 34.0.0 |
-| Gradle | 8.9 (via the included wrapper — no manual install needed) |
+| Android SDK | Platform 36, Build-Tools 35.0.0 |
+| Gradle | 8.11.1 (via the included wrapper — no manual install needed) |
 
 The Gradle wrapper (`./gradlew`) downloads the exact Gradle version automatically, so you only need to install a JDK and point the project at an Android SDK.
 
@@ -56,6 +56,7 @@ app/src/main/java/com/nothingmusic/
 
 - **Keep PRs small and reviewable.** One feature or fix per PR.
 - **Add tests for new logic.** Pure logic (parsers, formatters) belongs in `app/src/test/` — see `LyricsParserTest` for the pattern.
+- **Database changes need a migration.** Bump the `@Database` version, add a `Migration`, and commit the regenerated snapshot under `app/schemas/`. CI fails when a schema is out of date; destructive fallbacks are not accepted.
 - **Run the checks before pushing:** `./gradlew app:testDebugUnitTest app:lintDebug`
 - **Match existing style.** The project uses the official Kotlin coding style (`.editorconfig` included; most IDEs pick it up automatically).
 - **Describe the why.** Commit messages and PR descriptions should explain the motivation, not just the mechanics.

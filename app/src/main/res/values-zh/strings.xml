@@ -5,6 +5,8 @@
     <string name="a_nothingos_inspired_music_player">遵循 NothingOS 风格的音乐播放器。\n\n</string>
     <string name="about_nothing_music">关于</string>
     <string name="add_folders_in_settings_to_start_listening">到「设置」里添加文件夹后即可开始</string>
+    <string name="add_folder">添加文件夹</string>
+    <string name="add_a_folder_to_start_scanning">添加音乐文件夹后即可开始扫描</string>
     <string name="add_music">添加音乐</string>
     <string name="album">专辑</string>
     <string name="all_tracks_are_already_in_this_playlist">所有曲目都已在此歌单中</string>
@@ -13,7 +15,6 @@
     <string name="brand_name">NOTHING MUSIC</string>
     <string name="cancel">取消</string>
     <string name="choose_which_folders_to_scan">选择要扫描的文件夹</string>
-    <string name="choose_which_folders_to_scan_in_settings">在设置中选择要扫描的文件夹</string>
     <string name="clear">清除</string>
     <string name="close">关闭</string>
     <string name="create">创建</string>
@@ -24,15 +25,16 @@
     <string name="equalizer">均衡器</string>
     <string name="fade_out_and_pause_playback_automatically">自动淡出并暂停播放</string>
     <string name="folders">文件夹</string>
-    <string name="grant_access">授予权限</string>
+    <string name="folders_selected_count">已选择 %1$d 个文件夹</string>
+    <string name="folder_track_count">%1$d 首曲目</string>
     <string name="loading">加载中…</string>
     <string name="lyrics">歌词</string>
-    <string name="make_sure_storage_permission_is_granted">请确认已授予存储权限</string>
     <string name="manage_folders">管理文件夹</string>
     <string name="music">音乐</string>
     <string name="new_playlist">新建歌单</string>
-    <string name="no_audio_folders_found">未找到音频文件夹</string>
     <string name="no_folders_scanned">尚未扫描文件夹</string>
+    <string name="no_folders_yet">还没有文件夹</string>
+    <string name="remove_folder">移除文件夹</string>
     <string name="no_lyrics_found">未找到歌词</string>
     <string name="no_playlists_yet">还没有歌单</string>
     <string name="no_tracks_yet_tap_add_music">还没有曲目，点「添加音乐」</string>
@@ -43,7 +45,6 @@
     <string name="queue">队列</string>
     <string name="rename_playlist">重命名歌单</string>
     <string name="save">保存</string>
-    <string name="scanning">扫描中…</string>
     <string name="search">搜索</string>
     <string name="search_songs_artists_albums">搜索歌曲、艺术家、专辑…</string>
     <string name="settings">设置</string>
@@ -54,7 +55,6 @@
     <string name="sleep_timer_remaining">剩余 %1$d 分钟</string>
     <string name="sleep_timer_minutes">%1$d 分钟</string>
     <string name="start">开始</string>
-    <string name="storage_access_is_required_to_read_your_music_fi">读取音乐文件需要存储权限</string>
     <string name="surround_sound_effect">环绕声效果</string>
     <string name="this_cannot_be_undone">此操作不可撤销</string>
     <string name="tracks_ready">曲目就绪</string>

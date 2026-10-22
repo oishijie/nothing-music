@@ -31,6 +31,7 @@ fun RemoteTrackSummary.toTrack(): Track = Track(
     sizeBytes = sizeBytes,
     sampleRate = sampleRateHz,
     bitrate = bitrateKbps,
+    documentName = fileName,
     remoteId = mediaId,
 )
 

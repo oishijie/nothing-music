@@ -26,14 +26,6 @@ class SettingsManager @Inject constructor(context: Context) {
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
     }
 
-    var crossfadeMs: Int
-        get() = prefs.getInt(KEY_CROSSFADE_MS, 0)
-        set(value) = prefs.edit().putInt(KEY_CROSSFADE_MS, value).apply()
-
-    var gaplessPlayback: Boolean
-        get() = prefs.getBoolean(KEY_GAPLESS, true)
-        set(value) = prefs.edit().putBoolean(KEY_GAPLESS, value).apply()
-
     var sleepTimerRemaining: Long
         get() = prefs.getLong(KEY_SLEEP_TIMER_REMAINING_MS, -1L)
         set(value) = prefs.edit().putLong(KEY_SLEEP_TIMER_REMAINING_MS, value).apply()
@@ -104,8 +96,6 @@ class SettingsManager @Inject constructor(context: Context) {
     }
 
     private companion object {
-        const val KEY_CROSSFADE_MS = "crossfade_ms"
-        const val KEY_GAPLESS = "gapless"
         const val KEY_SLEEP_TIMER_REMAINING_MS = "sleep_timer_remaining"
         const val KEY_SLEEP_TIMER_ENDS_AT = "sleep_timer_ends_at"
         const val KEY_SLEEP_TIMER_ACTIVE = "sleep_timer_active"

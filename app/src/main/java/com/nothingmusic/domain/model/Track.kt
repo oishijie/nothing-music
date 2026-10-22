@@ -19,6 +19,14 @@ data class Track(
     val sizeBytes: Long = 0L,
     val sampleRate: Int = 0,
     val bitrate: Int = 0,
+    /** 文件最后修改时间（秒），SAF 增量扫描据此跳过未变化的文件。 */
+    val lastModified: Long = 0L,
+    /** 文件名（含扩展名）；SAF 的 path 是 content URI，无法直接取文件名。 */
+    val documentName: String = "",
+    /** 专辑艺术家（ID3 TPE2 / Vorbis ALBUMARTIST）；空白时回退到 [artist]。 */
+    val albumArtist: String = "",
+    /** 碟号；0 表示未知。 */
+    val discNumber: Int = 0,
     /**
      * 远程曲目标识（Mica 的 opaque mediaId）。非空时播放 URI 用 mica-remote://track/<id>，
      * id 字段则使用远程标识派生的稳定 Long，避免改动 Room 主键与全部列表。
@@ -33,6 +41,10 @@ data class Track(
 
     val isRemote: Boolean
         get() = remoteId != null
+
+    /** 专辑聚合键：有专辑艺术家用专辑艺术家，否则用曲目艺术家。 */
+    val resolvedAlbumArtist: String
+        get() = albumArtist.ifBlank { artist }
 
     val extension: String
         get() = path.substringAfterLast(".", "").lowercase()

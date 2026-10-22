@@ -1,11 +1,13 @@
 package com.nothingmusic.di
 
 import android.content.Context
+import com.nothingmusic.data.artwork.LocalArtworkStore
 import com.nothingmusic.data.local.AppDatabase
 import com.nothingmusic.data.local.dao.FavoriteDao
 import com.nothingmusic.data.local.dao.PlaylistDao
 import com.nothingmusic.data.local.dao.ScannedFolderDao
 import com.nothingmusic.data.local.dao.SearchHistoryDao
+import com.nothingmusic.data.local.dao.TrackDao
 import com.nothingmusic.data.repository.MusicRepositoryImpl
 import com.nothingmusic.data.scanner.AudioScanner
 import com.nothingmusic.domain.repository.MusicRepository
@@ -39,14 +41,12 @@ object AppModule {
     fun provideSearchHistoryDao(db: AppDatabase): SearchHistoryDao = db.searchHistoryDao()
 
     @Provides
-    @Singleton
-    fun provideSettingsManager(@ApplicationContext context: Context): SettingsManager =
-        SettingsManager(context)
+    fun provideTrackDao(db: AppDatabase): TrackDao = db.trackDao()
 
     @Provides
     @Singleton
-    fun provideAudioScanner(@ApplicationContext context: Context): AudioScanner =
-        AudioScanner(context)
+    fun provideSettingsManager(@ApplicationContext context: Context): SettingsManager =
+        SettingsManager(context)
 
     @Provides
     @Singleton
@@ -56,5 +56,15 @@ object AppModule {
         playlistDao: PlaylistDao,
         scannedFolderDao: ScannedFolderDao,
         favoriteDao: FavoriteDao,
-    ): MusicRepository = MusicRepositoryImpl(context, scanner, playlistDao, scannedFolderDao, favoriteDao)
+        trackDao: TrackDao,
+        artworkStore: LocalArtworkStore,
+    ): MusicRepository = MusicRepositoryImpl(
+        context,
+        scanner,
+        playlistDao,
+        scannedFolderDao,
+        favoriteDao,
+        trackDao,
+        artworkStore,
+    )
 }

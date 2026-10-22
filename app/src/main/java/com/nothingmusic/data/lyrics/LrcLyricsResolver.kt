@@ -2,6 +2,8 @@ package com.nothingmusic.data.lyrics
 
 import android.content.Context
 import android.net.Uri
+import android.provider.DocumentsContract
+import androidx.documentfile.provider.DocumentFile
 import com.mica.music.RemoteRuntime
 import com.mica.music.data.LyricsDocument
 import com.mica.music.data.LyricTextRole
@@ -52,6 +54,9 @@ object LrcLyricsResolver {
     private fun localDocument(context: Context, track: Track): LyricsDocument? {
         val path = track.path
         if (path.isBlank()) return null
+        if (path.startsWith("content://")) {
+            return safDocument(context, track, Uri.parse(path))
+        }
         val file = File(path)
         if (!file.isFile) {
             android.util.Log.d(TAG, "local: file missing path=$path")
@@ -98,6 +103,76 @@ object LrcLyricsResolver {
 
         android.util.Log.d(TAG, "local: full lines=${full?.lines?.size ?: 0}")
         return full?.takeIf { it.lines.isNotEmpty() }
+    }
+
+    /** SAF 文档：jaudiotagger 经 ParcelFileDescriptor 读取；旁挂 .lrc 通过父目录 DocumentFile 查找。 */
+    private fun safDocument(context: Context, track: Track, uri: Uri): LyricsDocument? {
+        val single = runCatching { DocumentFile.fromSingleUri(context, uri) }.getOrNull()
+        val displayName = track.documentName.ifBlank { single?.name.orEmpty() }
+
+        val tagDoc = runCatching {
+            JAudioTaggerReader.read(context, uri)?.let { tags ->
+                EmbeddedLyricsResolver.selectTagTextCandidate(
+                    candidates = tags.lyricsCandidates,
+                    parse = EmbeddedLyricsReader::parseTagTextDocument,
+                )
+            }
+        }.onFailure {
+            android.util.Log.d(TAG, "saf: jat failed ${it.javaClass.simpleName}")
+        }.getOrNull()
+        if (tagDoc != null && tagDoc.lines.isNotEmpty()) return tagDoc
+
+        val baseName = displayName.substringBeforeLast('.')
+        return runCatching {
+            EmbeddedLyricsReader.readDocument(
+                context = context,
+                uri = uri,
+                mimeType = track.mimeType,
+                displayName = displayName,
+                externalLyricsUris = safSidecarLyricsUris(context, uri, baseName),
+            )
+        }.onFailure {
+            android.util.Log.d(TAG, "saf: read failed ${it.javaClass.simpleName}")
+        }.getOrNull()?.takeIf { it.lines.isNotEmpty() }
+    }
+
+    /** SAF 下 DocumentFile 拿不到父目录，直接查询同目录的子文档找 .lrc/.ttml 旁挂歌词。 */
+    private fun safSidecarLyricsUris(
+        context: Context,
+        documentUri: Uri,
+        baseName: String,
+    ): List<String> {
+        if (baseName.isBlank()) return emptyList()
+        val authority = documentUri.authority ?: return emptyList()
+        val treeId = runCatching { DocumentsContract.getTreeDocumentId(documentUri) }
+            .getOrNull() ?: return emptyList()
+        val documentId = runCatching { DocumentsContract.getDocumentId(documentUri) }
+            .getOrNull() ?: return emptyList()
+        val parentId = documentId.substringBeforeLast('/', missingDelimiterValue = "")
+        if (parentId.isBlank()) return emptyList()
+
+        val treeUri = DocumentsContract.buildTreeDocumentUri(authority, treeId)
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+        )
+        return runCatching {
+            val found = mutableListOf<String>()
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(1) ?: continue
+                    if (!name.equals("$baseName.lrc", ignoreCase = true) &&
+                        !name.equals("$baseName.ttml", ignoreCase = true)
+                    ) {
+                        continue
+                    }
+                    val childId = cursor.getString(0) ?: continue
+                    found += DocumentsContract.buildDocumentUriUsingTree(treeUri, childId).toString()
+                }
+            }
+            found
+        }.getOrDefault(emptyList())
     }
 
     private suspend fun remoteDocument(track: Track): LyricsDocument? {

@@ -344,6 +344,9 @@ internal fun MediaItem.toTrack(): Track? {
         dateAdded = 0,
         trackNumber = 0,
         year = 0,
+        albumArtist = extras.getString("albumArtist")
+            ?: meta.albumArtist?.toString().orEmpty(),
+        discNumber = extras.getInt("discNumber", 0),
         remoteId = remoteId,
     )
 }
@@ -358,10 +361,13 @@ internal fun Track.toMediaItem(): MediaItem =
                 .setTitle(title)
                 .setArtist(artist)
                 .setAlbumTitle(album)
+                .setAlbumArtist(resolvedAlbumArtist)
                 .setMediaType(androidx.media3.common.MediaMetadata.MEDIA_TYPE_MUSIC)
                 .setExtras(android.os.Bundle().apply {
                     putLong("durationMs", durationMs)
                     putString("albumArtUri", albumArtUri?.toString())
+                    putString("albumArtist", albumArtist)
+                    putInt("discNumber", discNumber)
                     putLong("originalId", id)
                     putString("remoteId", remoteId)
                 })
