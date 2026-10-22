@@ -75,7 +75,7 @@ private fun MainScreen() {
     }
 
     val isBottomLevel = currentRoute in setOf(
-        Routes.LIBRARY, Routes.REMOTE, Routes.SETTINGS
+        Routes.LIBRARY, Routes.SEARCH, Routes.REMOTE, Routes.SETTINGS
     )
 
     Column(

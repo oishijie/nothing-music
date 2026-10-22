@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.LibraryMusic
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +33,7 @@ enum class BottomTab(
     val icon: ImageVector,
 ) {
     Library("library", R.string.tab_library, Icons.Outlined.LibraryMusic),
+    Search("search", R.string.tab_search, Icons.Outlined.Search),
     Remote("remote", R.string.tab_cloud, Icons.Outlined.Cloud),
     Settings("settings", R.string.tab_settings, Icons.Outlined.Settings),
 }

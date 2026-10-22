@@ -16,11 +16,13 @@ import com.nothingmusic.ui.screen.NowPlayingScreen
 import com.nothingmusic.ui.screen.PlaylistDetailScreen
 import com.nothingmusic.ui.screen.SettingsScreen
 import com.nothingmusic.ui.screen.queue.QueueScreen
+import com.nothingmusic.ui.screen.search.GlobalSearchScreen
 import com.nothingmusic.ui.screen.remote.RemoteLibraryScreen
 import com.nothingmusic.ui.screen.remote.RemoteSourcesScreen
 
 object Routes {
     const val LIBRARY = "library"
+    const val SEARCH = "search"
     const val SETTINGS = "settings"
     const val REMOTE = "remote"
     const val REMOTE_SOURCES = "remotesources"
@@ -58,6 +60,12 @@ fun NothingMusicNavGraph(
                 onNavigateToPlaylist = { id -> navController.navigate(Routes.playlist(id)) },
                 onNavigateToQueue = { navController.navigate(Routes.QUEUE) },
                 onNavigateToFolderPicker = { navController.navigate(Routes.FOLDER_PICKER) },
+            )
+        }
+        composable(Routes.SEARCH) {
+            GlobalSearchScreen(
+                playerViewModel = playerViewModel,
+                onNavigateToNowPlaying = { navController.navigate(Routes.NOW_PLAYING) },
             )
         }
         composable(Routes.REMOTE) {
